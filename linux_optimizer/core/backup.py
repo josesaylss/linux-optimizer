@@ -113,6 +113,23 @@ class BackupStore:
         except (OSError, json.JSONDecodeError):
             return None
 
+    def delete(self, snapshot_id: str) -> bool:
+        """Elimina físicamente un snapshot y sus respaldos de archivos."""
+        # Barrera de seguridad: solo nombres de carpeta directos del almacén
+        # (sin rutas, sin puntos especiales, sin vacío).
+        if (
+            not snapshot_id
+            or "/" in snapshot_id
+            or "\\" in snapshot_id
+            or snapshot_id in (".", "..")
+        ):
+            return False
+        snapshot_dir = self.base_dir / snapshot_id
+        if snapshot_dir.parent != self.base_dir or not snapshot_dir.is_dir():
+            return False
+        shutil.rmtree(snapshot_dir, ignore_errors=True)
+        return not snapshot_dir.exists()
+
     # ------------------------------------------------------------------
     # Restauración
     # ------------------------------------------------------------------

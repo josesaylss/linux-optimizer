@@ -5,6 +5,7 @@ from __future__ import annotations
 import platform
 
 from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QIcon, QAction
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -12,7 +13,9 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QStackedWidget,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
@@ -22,6 +25,8 @@ from linux_optimizer.core.backup import BackupStore
 from linux_optimizer.core.distro import DistroInfo, detect_distro
 from linux_optimizer.core.gaming import GamingManager
 from linux_optimizer.core.monitor import SystemMonitor
+from linux_optimizer.resources import ICON_PATH
+from linux_optimizer.ui.about_page import AboutPage
 from linux_optimizer.ui.cleaner_page import CleanerPage
 from linux_optimizer.ui.dashboard import DashboardPage
 from linux_optimizer.ui.diagnostics_page import DiagnosticsPage
@@ -38,6 +43,7 @@ _PAGES = (
     ("⚙️", "Servicios del sistema", ServicesPage),
     ("🔋", "Energía", PowerPage),
     ("🩺", "Diagnóstico", DiagnosticsPage),
+    ("ℹ️", "Acerca de", AboutPage),
 )
 
 
@@ -109,10 +115,35 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             "Modo seguro: toda acción de sistema pide confirmación y crea respaldo.")
 
+        self._setup_tray()
         self.monitor.start()
 
     # ------------------------------------------------------------------
 
+    def _setup_tray(self) -> None:
+        """Icono en la bandeja del sistema (si el escritorio lo soporta)."""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        self._tray = QSystemTrayIcon(QIcon(str(ICON_PATH)), self)
+        self._tray.setToolTip(f"{APP_NAME} {__version__}")
+        menu = QMenu()
+        action_toggle = QAction("Mostrar / ocultar", menu)
+        action_toggle.triggered.connect(self._toggle_visible)
+        menu.addAction(action_toggle)
+        menu.addSeparator()
+        action_quit = QAction("Salir", menu)
+        action_quit.triggered.connect(self.close)
+        menu.addAction(action_quit)
+        self._tray.setContextMenu(menu)
+        self._tray.activated.connect(
+            lambda _reason: self._toggle_visible())
+        self._tray.show()
+
+    def _toggle_visible(self) -> None:
+        self.setVisible(not self.isVisible())
+        if self.isVisible():
+            self.raise_()
+            self.activateWindow()
     def _build_page(self, page_class):
         if page_class is DashboardPage:
             return DashboardPage(self.monitor, self.distro)
@@ -126,6 +157,8 @@ class MainWindow(QMainWindow):
             return PowerPage(self.backup_store)
         if page_class is DiagnosticsPage:
             return DiagnosticsPage(self.distro)
+        if page_class is AboutPage:
+            return AboutPage(self.backup_store, self.distro)
         raise ValueError(page_class)
 
     def _switch_page(self, row: int) -> None:

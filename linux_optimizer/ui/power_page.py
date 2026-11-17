@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from linux_optimizer.core import kernel
 from linux_optimizer.core import power
 from linux_optimizer.ui.widgets import (
     Card,
@@ -21,6 +22,8 @@ from linux_optimizer.ui.widgets import (
     info_dialog,
     run_worker,
 )
+
+from PySide6.QtWidgets import QCheckBox, QSlider  # noqa: E402
 
 
 class PowerPage(QWidget):
@@ -69,6 +72,40 @@ class PowerPage(QWidget):
         battery_card.body.addWidget(self._battery_label)
         layout.addWidget(battery_card)
 
+        # -------- Ajustes de kernel (swappiness) --------
+        kernel_card = Card()
+        kernel_card.body.addWidget(SectionTitle("Kernel · swappiness (vm)"))
+        sw_note = QLabel(
+            "Controla qué tan agresivamente Linux usa la swap. Valores bajos (10) "
+            "favorecen juegos y escritorio con suficiente RAM; 60 es el valor por defecto."
+        )
+        sw_note.setObjectName("headerSubtitle")
+        sw_note.setWordWrap(True)
+        kernel_card.body.addWidget(sw_note)
+        sw_row = QHBoxLayout()
+        self._sw_slider = QSlider()
+        self._sw_slider.setRange(0, 100)
+        self._sw_slider.setValue(kernel.current_swappiness())
+        self._sw_value = QLabel(f"vm.swappiness = {self._sw_slider.value()}")
+        self._sw_slider.valueChanged.connect(
+            lambda v: self._sw_value.setText(f"vm.swappiness = {v}"))
+        sw_row.addWidget(self._sw_slider, 1)
+        sw_row.addWidget(self._sw_value)
+        kernel_card.body.addLayout(sw_row)
+        self._sw_persist = QCheckBox(
+            "Persistir tras reiniciar (/etc/sysctl.d/90-linux-optimizer.conf)")
+        self._sw_persist.setChecked(True)
+        kernel_card.body.addWidget(self._sw_persist)
+        sw_buttons = QHBoxLayout()
+        sw_buttons.addStretch(1)
+        self._sw_restore_btn = QPushButton("Restaurar valor anterior")
+        sw_buttons.addWidget(self._sw_restore_btn)
+        self._sw_apply_btn = QPushButton("Aplicar swappiness")
+        self._sw_apply_btn.setObjectName("primary")
+        sw_buttons.addWidget(self._sw_apply_btn)
+        kernel_card.body.addLayout(sw_buttons)
+        layout.addWidget(kernel_card)
+
         self._status = QLabel("")
         self._status.setObjectName("headerSubtitle")
         layout.addWidget(self._status)
@@ -80,7 +117,72 @@ class PowerPage(QWidget):
 
         self._apply_btn.clicked.connect(self.apply)
         self._restore_btn.clicked.connect(self.restore)
+        self._sw_apply_btn.clicked.connect(self._apply_swappiness)
+        self._sw_restore_btn.clicked.connect(self._restore_swappiness)
         self.refresh()
+
+    # ------------------------------------------------------------------
+
+    def _apply_swappiness(self) -> None:
+        value = self._sw_slider.value()
+        persist = self._sw_persist.isChecked()
+        if not confirm(
+            self,
+            "Confirmar cambio de swappiness",
+            f"¿Aplicar vm.swappiness = {value}?\n\n"
+            f"• Valor actual: {kernel.current_swappiness()}\n"
+            + (f"• Se persistirá en {kernel.SYSCTL_CONF}\n" if persist else
+               "• Solo en tiempo de ejecución (no sobrevive al reinicio)\n")
+            + "• Se guardará un respaldo del valor y archivo previos.\n"
+            "• Se pedirá tu contraseña (pkexec).",
+            danger=True,
+        ):
+            return
+        self._sw_apply_btn.setEnabled(False)
+        self._sw_apply_btn.setText("Aplicando…")
+
+        def done(result):
+            self._sw_apply_btn.setEnabled(True)
+            self._sw_apply_btn.setText("Aplicar swappiness")
+            ok, message = result
+            if ok:
+                self._status.setText(f"✔ {message}")
+            else:
+                error_dialog(self, "Swappiness", "No se pudo aplicar el valor.", message)
+
+        def error(message):
+            self._sw_apply_btn.setEnabled(True)
+            self._sw_apply_btn.setText("Aplicar swappiness")
+            error_dialog(self, "Swappiness", "Error inesperado.", message)
+
+        run_worker(self._sw_apply_btn,
+                   lambda: kernel.apply_swappiness(value, self._backup, persist),
+                   done, error, "Aplicando…", self)
+
+    def _restore_swappiness(self) -> None:
+        self._sw_restore_btn.setEnabled(False)
+
+        def done(result):
+            self._sw_restore_btn.setEnabled(True)
+            self._sw_restore_btn.setText("Restaurar valor anterior")
+            ok, message = result
+            if ok:
+                self._status.setText(f"✔ {message}")
+                self._sw_slider.blockSignals(True)
+                self._sw_slider.setValue(kernel.current_swappiness())
+                self._sw_slider.blockSignals(False)
+                self._sw_value.setText(f"vm.swappiness = {kernel.current_swappiness()}")
+            else:
+                info_dialog(self, "Swappiness", message)
+
+        def error(message):
+            self._sw_restore_btn.setEnabled(True)
+            self._sw_restore_btn.setText("Restaurar valor anterior")
+            error_dialog(self, "Swappiness", "Error inesperado.", message)
+
+        run_worker(self._sw_restore_btn,
+                   lambda: kernel.restore_last_swappiness(self._backup),
+                   done, error, "Restaurando…", self)
 
     # ------------------------------------------------------------------
 

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Linux Optimizer
+GenericName=Optimizador del sistema
+Comment=Optimiza y administra el rendimiento de tu computadora Linux
+Exec=@APPDIR@/run.sh
+Icon=linux-optimizer
+Terminal=false
+Categories=System;
+Keywords=optimizer;optimizador;rendimiento;limpieza;gaming;servicios;energia;
+StartupWMClass=LinuxOptimizer

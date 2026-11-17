@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import glob
 import os
 import re
 import subprocess
@@ -16,6 +17,7 @@ class GPUInfo:
     vendor: str  # nvidia | amd | intel | unknown
     pci_slot: str = ""
     driver: str = ""
+    sysfs_path: str = ""
 
     def short(self) -> str:
         return self.name or "GPU desconocida"
@@ -124,7 +126,10 @@ def _gpus_from_lspci() -> list[GPUInfo]:
                 break
             name = stripped
         name = name.strip() or f"GPU ({vendor})"
-        gpus.append(GPUInfo(name=name, vendor=vendor, pci_slot=slot, driver=_gpu_driver(slot)))
+        gpus.append(GPUInfo(
+            name=name, vendor=vendor, pci_slot=slot, driver=_gpu_driver(slot),
+            sysfs_path=f"/sys/bus/pci/devices/{slot}",
+        ))
     return gpus
 
 
@@ -157,6 +162,7 @@ def _gpus_from_sysfs() -> list[GPUInfo]:
             vendor=vendor,
             pci_slot=slot,
             driver=_gpu_driver(slot),
+            sysfs_path=f"/sys/bus/pci/devices/{slot}",
         ))
     return gpus
 
@@ -179,7 +185,8 @@ def detect_gpus() -> list[GPUInfo]:
             for gpu in gpus:
                 if gpu.vendor == "nvidia" and idx < len(names):
                     gpu = GPUInfo(name=names[idx], vendor=gpu.vendor,
-                                  pci_slot=gpu.pci_slot, driver=gpu.driver)
+                                  pci_slot=gpu.pci_slot, driver=gpu.driver,
+                                  sysfs_path=gpu.sysfs_path)
                     idx += 1
                 rebuilt.append(gpu)
             gpus = rebuilt
@@ -218,6 +225,45 @@ def detect_disks() -> list[DiskInfo]:
 # ----------------------------------------------------------------------------
 # Temperatura y batería
 # ----------------------------------------------------------------------------
+
+def _read_int_sysfs(path: str) -> float | None:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return float(fh.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def sysfs_gpu_stats(gpu: GPUInfo) -> dict | None:
+    """Estadísticas en vivo desde sysfs (amdgpu: gpu_busy_percent, VRAM, hwmon)."""
+    base = gpu.sysfs_path
+    if not base or not os.path.isdir(base):
+        return None
+    busy = _read_int_sysfs(os.path.join(base, "gpu_busy_percent"))
+    vram_used = _read_int_sysfs(os.path.join(base, "mem_info_vram_used"))
+    vram_total = _read_int_sysfs(os.path.join(base, "mem_info_vram_total"))
+    # hwmon del dispositivo (amdgpu expone la temperatura como temp1_input).
+    temp = None
+    for hwmon in glob.glob(os.path.join(base, "hwmon", "hwmon*")):
+        try:
+            with open(os.path.join(hwmon, "name"), encoding="utf-8") as fh:
+                chip = fh.read().lower()
+        except OSError:
+            continue
+        if "amdgpu" in chip or "radeon" in chip:
+            temp = _read_int_sysfs(os.path.join(hwmon, "temp1_input"))
+            if temp is not None:
+                temp /= 1000.0
+            break
+    if busy is None and temp is None:
+        return None
+    return {
+        "name": gpu.short(),
+        "util": busy if busy is not None else 0.0,
+        "mem_used_mb": (vram_used or 0) / 1e6,
+        "mem_total_mb": (vram_total or 0) / 1e6,
+        "temp": temp if temp is not None else 0.0,
+    }
 
 def detect_temperatures() -> list[tuple[str, float]]:
     """Lista de (etiqueta, °C) de los sensores disponibles."""

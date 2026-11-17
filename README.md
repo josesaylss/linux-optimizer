@@ -14,6 +14,11 @@ PySide6 + psutil + Qt Stylesheets (QSS)**.
 | ⚙️ **Servicios del sistema** | Listado de unidades systemd con estado; iniciar/detener/reiniciar/habilitar/deshabilitar con protección de servicios esenciales. |
 | 🔋 **Energía** | Detección automática del backend (power-profiles-daemon, tuned o governor de CPU) y cambio de perfil con respaldo. |
 | 🩺 **Diagnóstico** | Comprobaciones de solo lectura: arranque, unidades en fallo, errores del journal y del kernel, discos, memoria, temperatura, swappiness, governor. Informe copiable. |
+| ℹ️ **Acerca de** | Información del entorno, historial de respaldos con apertura/eliminación. |
+
+Además: icono en la bandeja del sistema (si el escritorio lo soporta), integración
+con el menú de aplicaciones y GPU con métricas en vivo para NVIDIA (nvidia-smi)
+y AMD (sysfs: `gpu_busy_percent`, VRAM, hwmon).
 
 ## Compatibilidad
 
@@ -54,6 +59,18 @@ python3 -m venv .venv
 ./run.sh          # o: .venv/bin/python -m linux_optimizer
 ```
 
+### Integración con el escritorio
+
+```bash
+packaging/install-desktop.sh   # ícono + entrada en el menú (sin root)
+```
+
+Para generar un RPM en Fedora:
+
+```bash
+rpmbuild -bb packaging/linux-optimizer.spec
+```
+
 ## Estructura del proyecto
 
 ```
@@ -68,6 +85,7 @@ linux_optimizer/
 │   ├── cleaner.py          #   Objetivos de limpieza (scan/clean seguros)
 │   ├── services.py         #   systemd + lista de servicios esenciales
 │   ├── power.py            #   Perfiles de energía (ppd/tuned/governor)
+│   ├── kernel.py           #   Swappiness con persistencia y restauración
 │   ├── gaming.py           #   Acciones del modo gaming (reversibles)
 │   ├── diagnostics.py      #   Comprobaciones de solo lectura
 │   ├── backup.py           #   Snapshots y restauración

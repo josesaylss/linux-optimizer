@@ -5,10 +5,12 @@ from __future__ import annotations
 import sys
 import traceback
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from linux_optimizer import APP_NAME, __version__
 from linux_optimizer.main_window import MainWindow
+from linux_optimizer.resources import ICON_PATH
 from linux_optimizer.theme import THEME_QSS
 
 
@@ -20,6 +22,7 @@ def main(argv: list[str] | None = None) -> int:
     app.setOrganizationName("LinuxOptimizer")
     app.setStyle("Fusion")
     app.setStyleSheet(THEME_QSS)
+    app.setWindowIcon(QIcon(str(ICON_PATH)))
 
     try:
         window = MainWindow()

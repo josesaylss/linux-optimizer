@@ -15,11 +15,12 @@ from linux_optimizer.core.hardware import (
     detect_disks,
     detect_gpus,
     detect_temperatures,
+    sysfs_gpu_stats,
 )
 
 
-def gpu_live_stats() -> list[dict]:
-    """Uso en vivo de GPUs NVIDIA (si hay controlador y nvidia-smi)."""
+def _nvidia_stats() -> dict[str, dict]:
+    """Estadísticas de GPUs NVIDIA indexadas por nombre (vía nvidia-smi)."""
     try:
         proc = subprocess.run(
             ["nvidia-smi",
@@ -27,25 +28,39 @@ def gpu_live_stats() -> list[dict]:
              "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=5, check=False,
         )
-    except Exception:
-        return []
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
     if proc.returncode != 0:
-        return []
-    stats = []
-    for line in out.splitlines():
+        return {}
+    stats: dict[str, dict] = {}
+    for line in proc.stdout.splitlines():
         fields = [f.strip() for f in line.split(",")]
         if len(fields) != 5:
             continue
         try:
-            stats.append({
+            stats[fields[0]] = {
                 "name": fields[0],
                 "util": float(fields[1]),
                 "mem_used_mb": float(fields[2]),
                 "mem_total_mb": float(fields[3]),
                 "temp": float(fields[4]),
-            })
+            }
         except ValueError:
             continue
+    return stats
+
+
+def gpu_live_stats(gpus: list[GPUInfo]) -> list[dict]:
+    """Estadísticas en vivo por GPU: nvidia-smi para NVIDIA, sysfs para el resto."""
+    nvidia = _nvidia_stats()
+    stats: list[dict] = []
+    for gpu in gpus:
+        if gpu.vendor == "nvidia" and nvidia:
+            stats.append(nvidia[gpu.name] if gpu.name in nvidia else next(iter(nvidia.values())))
+            continue
+        sysfs = sysfs_gpu_stats(gpu)
+        if sysfs:
+            stats.append(sysfs)
     return stats
 
 
@@ -115,7 +130,7 @@ class SystemMonitor(QObject):
         self._last_time = now
 
         temps = detect_temperatures()
-        gpu_stats = gpu_live_stats() if self.gpus else []
+        gpu_stats = gpu_live_stats(self.gpus) if self.gpus else []
 
         stats = {
             "cpu": {
