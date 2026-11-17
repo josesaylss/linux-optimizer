@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from collections import deque
 
@@ -186,6 +187,8 @@ class Worker(QThread):
         try:
             self.done.emit(self._fn())
         except Exception as exc:  # noqa: BLE001
+            logging.getLogger("LinuxOptimizer.worker").exception(
+                "Error en tarea de fondo")
             self.error.emit(f"{type(exc).__name__}: {exc}")
 
     def _unregister(self) -> None:

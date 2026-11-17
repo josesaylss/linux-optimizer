@@ -8,6 +8,7 @@ confirmación antes y el estado previo queda respaldado).
 from __future__ import annotations
 
 import glob
+import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,7 @@ from linux_optimizer.core.permissions import run, run_privileged
 from linux_optimizer.core.cleaner import build_batch_script, _parse_batch_output
 
 GAMING_BACKUP_KIND = "gaming"
+log = logging.getLogger("LinuxOptimizer.gaming")
 
 
 @dataclass
@@ -408,6 +410,7 @@ class GamingManager:
                     else:
                         failed.append(
                             f"{action.title}: {err.strip() or f'pkexec rc={rc}'}")
+        log.info("apply(claves=%s) → ok=%s | fallidas=%s", keys, ok, failed)
         return ok, failed
 
     def revert_all(self) -> tuple[list[str], list[str]]:
@@ -455,6 +458,7 @@ class GamingManager:
             if action.applied and action.needs_root and action.revert_command is None:
                 action.applied = False
                 ok.append(f"{action.title}: no requiere reversión")
+        log.info("revert_all() → ok=%s | fallidas=%s", ok, failed)
         return ok, failed
 
     def pending_reverts(self) -> int:

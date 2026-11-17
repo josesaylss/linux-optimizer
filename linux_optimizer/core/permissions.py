@@ -15,8 +15,6 @@ import subprocess
 from linux_optimizer import APP_NAME
 
 log = logging.getLogger(APP_NAME.replace(" ", "."))
-
-
 def which(binary: str) -> str | None:
     return shutil.which(binary)
 
@@ -58,7 +56,9 @@ def run_privileged(cmd: list[str], timeout: float = 120.0) -> tuple[int, str, st
             "aplicación desde una sesión con polkit disponible."
         )
     rc, out, err = run([pkexec, "--disable-internal-agent", *cmd], timeout=timeout)
-    if rc != 0:
+    if rc == 0:
+        log.info("pkexec OK: %s", cmd[0])
+    else:
         log.warning("pkexec rc=%s cmd=%s err=%s", rc, cmd[0], err.strip()[:300])
         err = f"{err.strip()} (pkexec rc={rc})"
     return rc, out, err
