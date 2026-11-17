@@ -87,9 +87,16 @@ def dir_stats(paths: list[str], exclude: list[str] | None = None) -> ScanResult:
 
 
 def delete_contents(paths: list[str], exclude: list[str] | None = None) -> CleanResult:
-    """Elimina el CONTENIDO de cada ruta, nunca la ruta raíz."""
+    """Elimina el CONTENIDO de cada ruta, nunca la ruta raíz.
+
+    Los elementos que no se pueden borrar por permisos (p. ej. creados por
+    una app elevada dentro de ~/.cache) se OMITEN y se informan en `note`;
+    solo se reporta `error` si no se pudo borrar absolutamente nada.
+    """
     result = CleanResult()
     excluded = {os.path.realpath(p) for p in (exclude or [])}
+    skipped: list[str] = []
+    errors: list[str] = []
     for path in paths:
         base = Path(path)
         if not base.is_dir():
@@ -108,7 +115,18 @@ def delete_contents(paths: list[str], exclude: list[str] | None = None) -> Clean
             except FileNotFoundError:
                 continue
             except OSError as exc:
-                result.error = result.error or f"No se pudo borrar {entry}: {exc}"
+                skipped.append(entry.name)
+                detail = f"No se pudo borrar {entry}: {exc}"
+                if detail not in errors:
+                    errors.append(detail)
+    if skipped:
+        if result.removed > 0:
+            result.note = (
+                f"{result.removed} elemento(s) borrados; {len(skipped)} omitidos "
+                "por permisos (creados por otra app con privilegios)"
+            )
+        else:
+            result.error = errors[0] if errors else "Nada se pudo borrar"
     return result
 
 

@@ -41,8 +41,14 @@ class BackupStore:
         data: dict | None = None,
         file_paths: list[str] | None = None,
     ) -> str:
-        """Crea un snapshot y devuelve su id (timestamp + kind)."""
-        snapshot_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{kind}"
+        """Crea un snapshot y devuelve su id (timestamp + kind + ordinal)."""
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        snapshot_id = f"{timestamp}-{kind}"
+        # Garantiza unicidad aunque haya varios snapshots en el mismo segundo.
+        serial = 0
+        while (self.base_dir / snapshot_id).exists():
+            serial += 1
+            snapshot_id = f"{timestamp}-{kind}-{serial}"
         snap_dir = self.base_dir / snapshot_id
         files_dir = snap_dir / "files"
         files_dir.mkdir(parents=True, exist_ok=False)

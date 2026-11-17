@@ -70,9 +70,8 @@ class GamingManager:
         cache = str(Path.home() / ".cache")
 
         def apply():
-            result = cleaner.delete_contents(
-                [cache], exclude=[self.app_cache_dir],
-            )
+            exclude = [self.app_cache_dir] if self.app_cache_dir else []
+            result = cleaner.delete_contents([cache], exclude=exclude)
             if result.error:
                 return False, result.error
             return True, f"Caché de usuario liberada: {_fmt(result.freed)}"
