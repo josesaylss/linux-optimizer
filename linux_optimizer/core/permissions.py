@@ -8,10 +8,13 @@ el usuario haya confirmado previamente en un diálogo.
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 
 from linux_optimizer import APP_NAME
+
+log = logging.getLogger(APP_NAME.replace(" ", "."))
 
 
 def which(binary: str) -> str | None:
@@ -54,8 +57,11 @@ def run_privileged(cmd: list[str], timeout: float = 120.0) -> tuple[int, str, st
             "No se encontró pkexec (polkit). Instálalo o ejecuta la "
             "aplicación desde una sesión con polkit disponible."
         )
-    # pkexec necesita un nombre de programa para mostrar un diálogo creíble.
-    return run([pkexec, "--disable-internal-agent", *cmd], timeout=timeout)
+    rc, out, err = run([pkexec, "--disable-internal-agent", *cmd], timeout=timeout)
+    if rc != 0:
+        log.warning("pkexec rc=%s cmd=%s err=%s", rc, cmd[0], err.strip()[:300])
+        err = f"{err.strip()} (pkexec rc={rc})"
+    return rc, out, err
 
 
 def is_cancelled(stderr: str) -> bool:
