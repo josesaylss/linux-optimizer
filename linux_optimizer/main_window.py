@@ -31,6 +31,7 @@ from linux_optimizer.ui.cleaner_page import CleanerPage
 from linux_optimizer.ui.dashboard import DashboardPage
 from linux_optimizer.ui.diagnostics_page import DiagnosticsPage
 from linux_optimizer.ui.gaming_page import GamingPage
+from linux_optimizer.ui.hud_window import GamingHud
 from linux_optimizer.ui.power_page import PowerPage
 from linux_optimizer.ui.services_page import ServicesPage
 from linux_optimizer.ui.widgets import Card  # noqa: F401 (estilo común)
@@ -58,6 +59,7 @@ class MainWindow(QMainWindow):
         self.backup_store = BackupStore()
         self.monitor = SystemMonitor()
         self.gaming_manager = GamingManager(self.backup_store)
+        self.hud = GamingHud(self.monitor, self)
 
         central = QWidget()
         root = QHBoxLayout(central)
@@ -130,6 +132,12 @@ class MainWindow(QMainWindow):
         action_toggle = QAction("Mostrar / ocultar", menu)
         action_toggle.triggered.connect(self._toggle_visible)
         menu.addAction(action_toggle)
+        action_hud = QAction("HUD de rendimiento", menu)
+        action_hud.setCheckable(True)
+        action_hud.setChecked(False)
+        action_hud.toggled.connect(
+            lambda on: self.hud.show() if on else self.hud.hide())
+        menu.addAction(action_hud)
         menu.addSeparator()
         action_quit = QAction("Salir", menu)
         action_quit.triggered.connect(self.close)
@@ -150,7 +158,7 @@ class MainWindow(QMainWindow):
         if page_class is CleanerPage:
             return CleanerPage(self.distro)
         if page_class is GamingPage:
-            return GamingPage(self.gaming_manager)
+            return GamingPage(self.gaming_manager, self.hud)
         if page_class is ServicesPage:
             return ServicesPage(self.backup_store)
         if page_class is PowerPage:

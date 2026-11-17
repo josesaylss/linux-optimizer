@@ -23,9 +23,10 @@ from linux_optimizer.ui.widgets import (
 
 
 class GamingPage(QWidget):
-    def __init__(self, gaming_manager: GamingManager, parent: QWidget | None = None):
+    def __init__(self, gaming_manager: GamingManager, hud=None, parent: QWidget | None = None):
         super().__init__(parent)
         self._manager = gaming_manager
+        self._hud = hud
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 18, 24, 18)
@@ -80,6 +81,11 @@ class GamingPage(QWidget):
         layout.addWidget(self._status)
 
         buttons = QHBoxLayout()
+        self._hud_btn = QPushButton("Mostrar HUD")
+        self._hud_btn.setCheckable(True)
+        self._hud_btn.setEnabled(self._hud is not None)
+        self._hud_btn.toggled.connect(self._toggle_hud)
+        buttons.addWidget(self._hud_btn)
         buttons.addStretch(1)
         self._revert_btn = QPushButton("Salir del modo gaming")
         buttons.addWidget(self._revert_btn)
@@ -90,6 +96,42 @@ class GamingPage(QWidget):
 
         self._apply_btn.clicked.connect(self.apply)
         self._revert_btn.clicked.connect(self.revert)
+
+        # Casilla: mostrar HUD automáticamente al activar el modo.
+        self._hud_auto = QCheckBox("Mostrar el HUD de rendimiento al activar")
+        self._hud_auto.setChecked(True)
+        self._hud_auto.setEnabled(self._hud is not None)
+        layout.addWidget(self._hud_auto)
+
+        # Guía de FPS con MangoHud
+        fps_card = Card()
+        fps_card.body.addWidget(SectionTitle("FPS en vivo (MangoHud)"))
+        fps_hint = QLabel(self._fps_hint_text())
+        fps_hint.setObjectName("headerSubtitle")
+        fps_hint.setWordWrap(True)
+        fps_card.body.addWidget(fps_hint)
+        layout.addWidget(fps_card)
+
+    def _fps_hint_text(self) -> str:
+        import shutil
+        if shutil.which("mangohud"):
+            return (
+                "✔ MangoHud instalado. Para que el HUD lea los FPS reales, lanza el "
+                "juego con MangoHud:\n"
+                "• Terminal:  mangohud <comando-del-juego>\n"
+                "• Steam:  en Propiedades → Opciones de lanzamiento añade:  mangohud %command%\n"
+                "El HUD se conecta automáticamente al juego detectado."
+            )
+        return ("MangoHud no está instalado; sin él no se pueden leer los FPS del juego. "
+                "Instala el paquete «mangohud» y lanza el juego con «mangohud %command%» en Steam.")
+
+    def _toggle_hud(self, on: bool) -> None:
+        if self._hud is None:
+            return
+        if on:
+            self._hud.show()
+        else:
+            self._hud.hide()
 
     def _refresh_gamemode(self) -> None:
         if self._manager.gamemode_installed():
@@ -134,6 +176,9 @@ class GamingPage(QWidget):
             self._status.setText(
                 "✔ Modo gaming activo." if ok else "⚠ No se aplicó ningún cambio."
             )
+            if ok and self._hud is not None and self._hud_auto.isChecked():
+                self._hud.show()
+                self._hud_btn.setChecked(True)
             info_dialog(self, "Modo gaming", "Resultado:",
                         "\n".join(ok + failed) or "Sin cambios")
 

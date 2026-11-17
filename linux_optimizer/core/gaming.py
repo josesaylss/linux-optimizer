@@ -56,6 +56,9 @@ class GamingManager:
         self.actions = [
             self._action_clean_cache(),
             self._action_governor(),
+            self._action_amdgpu_performance(),
+            self._action_swappiness(),
+            self._action_drop_caches(),
             self._action_stop_bluetooth(),
             self._action_stop_cups(),
             self._action_stop_avahi(),
@@ -199,6 +202,134 @@ class GamingManager:
             action.unsupported_reason = f"El servicio {unit} no existe en este sistema"
         return action
 
+    def _action_amdgpu_performance(self) -> GamingAction:
+        paths = sorted(glob.glob(
+            "/sys/class/drm/card*/device/power_dpm_force_performance_level"))
+        action = GamingAction(
+            key="amdgpu_perf",
+            title="GPU AMD en rendimiento alto",
+            description="Fuerza el nivel de energía de la GPU AMD a «high» durante el juego "
+                        "en vez de la gestión automática (revertible).",
+            needs_root=True,
+        )
+        if not paths:
+            action.supported = False
+            action.unsupported_reason = "No hay GPU AMD con controlador amdgpu"
+            return action
+        self._saved_dpm: dict[str, str] = getattr(self, "_saved_dpm", {})
+
+        def pre_apply() -> str | None:
+            self._saved_dpm = {}
+            for path in paths:
+                try:
+                    with open(path, encoding="utf-8") as fh:
+                        self._saved_dpm[path] = fh.read().strip()
+                except OSError:
+                    continue
+            self.backup.snapshot(
+                kind=GAMING_BACKUP_KIND,
+                label="Nivel de energía de GPU antes del modo gaming",
+                data={"dpm": self._saved_dpm},
+            )
+            return None
+
+        def root_command() -> str:
+            return "; ".join(f"echo 'high' > {p}" for p in paths)
+
+        def mark_applied() -> str:
+            values = {_read_file(p) for p in paths}
+            if values == {"high"}:
+                return f"GPU AMD forzada a «high» en {len(paths)} tarjeta(s)"
+            return f"⚠ Nivel actual: {', '.join(values)}"
+
+        def revert_command() -> str:
+            if not self._saved_dpm:
+                return "true"
+            return "; ".join(
+                f"echo '{value}' > {path}" for path, value in self._saved_dpm.items()
+            )
+
+        def mark_reverted() -> str:
+            values = sorted(set(self._saved_dpm.values()))
+            self._saved_dpm = {}
+            return f"GPU AMD restaurada: {', '.join(values) or 'auto'}"
+
+        action.pre_apply = pre_apply
+        action.root_command = root_command
+        action.mark_applied = mark_applied
+        action.revert_command = revert_command
+        action.mark_reverted = mark_reverted
+        return action
+
+    def _action_swappiness(self) -> GamingAction:
+        def _current() -> int:
+            try:
+                with open("/proc/sys/vm/swappiness", encoding="utf-8") as fh:
+                    return int(fh.read().strip())
+            except (OSError, ValueError):
+                return 60
+
+        action = GamingAction(
+            key="swappiness_low",
+            title="Swappiness bajo (10)",
+            description="Reduce el uso de swap durante el juego para evitar micro-tirones.",
+            needs_root=True,
+        )
+        self._saved_swappiness = getattr(self, "_saved_swappiness", None)
+
+        def pre_apply() -> str | None:
+            self._saved_swappiness = _current()
+            self.backup.snapshot(
+                kind=GAMING_BACKUP_KIND,
+                label=f"Swappiness antes del modo gaming: {self._saved_swappiness}",
+                data={"swappiness": self._saved_swappiness},
+            )
+            return None
+
+        def root_command() -> str:
+            return "echo '10' > /proc/sys/vm/swappiness"
+
+        def mark_applied() -> str:
+            now = _current()
+            return (f"vm.swappiness = {now}"
+                    + (f" (antes: {self._saved_swappiness})" if self._saved_swappiness is not None else ""))
+
+        def revert_command() -> str:
+            if self._saved_swappiness is None:
+                return "true"
+            return f"echo '{self._saved_swappiness}' > /proc/sys/vm/swappiness"
+
+        def mark_reverted() -> str:
+            value = self._saved_swappiness
+            self._saved_swappiness = None
+            return f"vm.swappiness restaurado a {value}"
+
+        action.pre_apply = pre_apply
+        action.root_command = root_command
+        action.mark_applied = mark_applied
+        action.revert_command = revert_command
+        action.mark_reverted = mark_reverted
+        return action
+
+    def _action_drop_caches(self) -> GamingAction:
+        action = GamingAction(
+            key="drop_caches",
+            title="Liberar cachés del kernel",
+            description="Sincroniza discos y libera la caché de páginas del kernel "
+                        "antes de jugar. No requiere reversión.",
+            needs_root=True,
+        )
+
+        def root_command() -> str:
+            return "sync; echo 3 > /proc/sys/vm/drop_caches"
+
+        def mark_applied() -> str:
+            return "Cachés del kernel liberadas"
+
+        action.root_command = root_command
+        action.mark_applied = mark_applied
+        return action
+
     def _action_stop_bluetooth(self) -> GamingAction:
         return self._unit_action(
             "stop_bluetooth",
@@ -318,6 +449,12 @@ class GamingManager:
             for action in root_to_revert:
                 if action.key not in parsed:
                     failed.append(f"{action.title}: {err.strip() or f'pkexec rc={rc}'}")
+
+        # 3) Acciones root sin reversión (ej. drop_caches): solo limpiar estado.
+        for action in self.actions:
+            if action.applied and action.needs_root and action.revert_command is None:
+                action.applied = False
+                ok.append(f"{action.title}: no requiere reversión")
         return ok, failed
 
     def pending_reverts(self) -> int:
@@ -339,6 +476,10 @@ def _read_governor(path: str) -> str:
             return fh.read().strip()
     except OSError:
         return ""
+
+
+def _read_file(path: str) -> str:
+    return _read_governor(path)
 
 
 def _fmt(num: float) -> str:
