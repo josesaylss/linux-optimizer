@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "linux-optimizer"
+version = "0.1.0"
+description = "Herramienta gráfica para optimizar y administrar el rendimiento de Linux"
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6>=6.6",
+    "psutil>=5.9",
+]
+
+[project.scripts]
+linux-optimizer = "linux_optimizer.app:main"
+
+[tool.setuptools.packages.find]
+include = ["linux_optimizer*"]
