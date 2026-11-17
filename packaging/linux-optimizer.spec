@@ -14,7 +14,6 @@ URL:            https://example.invalid/linux-optimizer
 Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      noarch
-BuildRequires:  python3-devel
 Requires:       python3-pyside6
 Requires:       python3-psutil
 Requires:       polkit
@@ -27,12 +26,18 @@ de cachés, modo gaming, administración de servicios systemd, perfiles de energ
 y diagnóstico. Pensada para Fedora y arquitectura lista para Debian/Ubuntu/Arch.
 
 %prep
-%autosetup -n %{name}-%{version}
+%setup -q -n %{name}-%{version}
 
 %build
 # No requiere compilación.
 
 %install
+# Localiza el árbol extraído sea cual sea el layout de BUILD de esta versión de rpm.
+SRCDIR="$(dirname "$(find %{_topdir}/BUILD -type d -name linux_optimizer | head -1)")"
+if [ ! -d "$SRCDIR/linux_optimizer" ]; then
+    echo "No se encontró el árbol fuente en BUILD"; exit 1
+fi
+cd "$SRCDIR"
 mkdir -p %{buildroot}%{_datadir}/%{name}
 cp -a linux_optimizer %{buildroot}%{_datadir}/%{name}/
 install -Dm755 run.sh %{buildroot}%{_bindir}/linux-optimizer

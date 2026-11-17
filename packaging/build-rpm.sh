@@ -2,7 +2,7 @@
 # Construye el RPM de Linux Optimizer en un directorio de build local.
 # Requiere: sudo dnf install -y rpm-build
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 if ! command -v rpmbuild >/dev/null 2>&1; then
     echo "✖ Falta rpmbuild. Instálalo con:"
@@ -12,7 +12,8 @@ fi
 
 VERSION="0.1.0"
 NAME="linux-optimizer"
-TOPDIR="${TOPDIR:-$PWD/rpm/build}"
+APPDIR="$(pwd)"
+TOPDIR="${TOPDIR:-$APPDIR/packaging/rpm/build}"
 mkdir -p "$TOPDIR"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
 # Tarball: regenerarlo desde git para garantizar contenido actualizado.
@@ -20,7 +21,7 @@ echo "→ Generando tarball fuente $NAME-$VERSION.tar.gz…"
 git ls-files | grep -v -E '^(packaging/rpm|\.venv)' \
     | tar --transform "s,^,$NAME-$VERSION/," -czf "$TOPDIR/SOURCES/$NAME-$VERSION.tar.gz" -T -
 
-cp "$NAME.spec" "$TOPDIR/SPECS/"
+cp packaging/"$NAME.spec" "$TOPDIR/SPECS/"
 
 echo "→ Compilando RPM (noarch, binario)…"
 rpmbuild -bb \
