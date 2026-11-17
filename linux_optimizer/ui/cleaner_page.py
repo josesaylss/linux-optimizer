@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from linux_optimizer.core import cleaner
 from linux_optimizer.core.cleaner import build_targets
 from linux_optimizer.ui.widgets import (
     Card,
