@@ -15,6 +15,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from linux_optimizer.core.permissions import run_privileged
+
 
 @dataclass
 class ScanResult:
@@ -32,6 +34,7 @@ class ScanResult:
 class CleanResult:
     freed: int = 0
     removed: int = 0
+    note: str = ""
     error: str = ""
 
 
@@ -45,6 +48,8 @@ class CleanTarget:
     family: str | None = None
     scan: object = None      # Callable[[], ScanResult]
     clean: object = None     # Callable[[], CleanResult]
+    # Comando shell para ejecutar todas las limpiezas root en UN solo pkexec.
+    root_command: str | None = None
 
     def available(self, distro_family: str) -> bool:
         return self.family is None or self.family == distro_family
@@ -273,6 +278,7 @@ def build_targets(distro_family: str) -> list[CleanTarget]:
             title="Registros del sistema (journal)",
             description="Mantiene solo los últimos 7 días de journald. Requiere privilegios.",
             needs_root=True,
+            root_command="journalctl --vacuum-time=7d",
             scan=_scan_journal,
             clean=_clean_journal,
         ),
@@ -293,6 +299,7 @@ def build_targets(distro_family: str) -> list[CleanTarget]:
             description="Vacia /var/cache/dnf. Los paquetes instalados no se tocan.",
             needs_root=True,
             family="fedora",
+            root_command="dnf -y clean all",
             scan=lambda: _scan_root_dir("/var/cache/dnf"),
             clean=_clean_dnf_cache,
         ),
@@ -302,6 +309,7 @@ def build_targets(distro_family: str) -> list[CleanTarget]:
             description="Vacia /var/cache/apt/archives (.deb descargados).",
             needs_root=True,
             family="debian",
+            root_command="apt-get clean",
             scan=lambda: _scan_root_dir("/var/cache/apt/archives"),
             clean=_clean_apt_cache,
         ),
@@ -311,6 +319,7 @@ def build_targets(distro_family: str) -> list[CleanTarget]:
             description="Conserva solo la versión más reciente de cada paquete en caché.",
             needs_root=True,
             family="arch",
+            root_command="paccache -rk1 || pacman -Sc --noconfirm",
             scan=lambda: _scan_root_dir("/var/cache/pacman/pkg"),
             clean=_clean_pacman_cache,
         ),
@@ -325,3 +334,67 @@ def _scan_root_dir(path: str) -> ScanResult:
     if os.path.isdir(path):
         return dir_stats([path])
     return ScanResult(note="El directorio no existe en este sistema")
+
+
+# ----------------------------------------------------------------------------
+# Limpieza por lotes: todas las acciones root en UN solo diálogo de pkexec
+# ----------------------------------------------------------------------------
+
+def _parse_batch_output(output: str) -> dict[str, int]:
+    """Parsea los marcadores @@key:END <rc> emitidos por el script por lotes."""
+    parsed: dict[str, int] = {}
+    for line in output.splitlines():
+        line = line.strip()
+        if line.startswith("@@") and ":END" in line:
+            key, rest = line[2:].split(":END", 1)
+            try:
+                parsed[key] = int(rest.strip())
+            except ValueError:
+                parsed[key] = 1
+    return parsed
+
+
+def build_batch_script(commands: list[tuple[str, str]]) -> str:
+    """Genera un script con un marcador por objetivo para reportar el resultado."""
+    lines = ["set +e"]
+    for key, cmd in commands:
+        lines.append(f"echo '@@{key}:BEGIN'")
+        lines.append(cmd)
+        lines.append(f"echo '@@{key}:END' $?")
+    return "\n".join(lines)
+
+
+def clean_batch(selected: list[CleanTarget]) -> dict[str, CleanResult]:
+    """Limpia los objetivos seleccionados pidiendo la contraseña UNA sola vez.
+
+    Los objetivos de usuario se ejecutan en el proceso actual; los de sistema
+    se agrupan en un único script elevado con pkexec y se reporta el resultado
+    de cada uno mediante marcadores en la salida.
+    """
+    results: dict[str, CleanResult] = {}
+    root_commands: list[tuple[str, str]] = []
+
+    for target in selected:
+        if target.needs_root and target.root_command:
+            root_commands.append((target.key, target.root_command))
+        else:
+            try:
+                results[target.key] = target.clean()
+            except Exception as exc:  # noqa: BLE001
+                results[target.key] = CleanResult(error=str(exc))
+
+    if root_commands:
+        script = build_batch_script(root_commands)
+        rc, out, err = run_privileged(["bash", "-c", script], timeout=600)
+        parsed = _parse_batch_output(out)
+        for key, _cmd in root_commands:
+            if key in parsed:
+                if parsed[key] == 0:
+                    results[key] = CleanResult(note="Limpieza ejecutada correctamente")
+                else:
+                    results[key] = CleanResult(error=f"El comando falló (rc={parsed[key]})")
+            elif rc == 126 or "dismissed" in err.lower() or "not authorized" in err.lower():
+                results[key] = CleanResult(error="Autenticación cancelada por el usuario")
+            else:
+                results[key] = CleanResult(error=err.strip() or f"pkexec rc={rc}")
+    return results

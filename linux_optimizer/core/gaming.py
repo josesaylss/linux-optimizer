@@ -1,20 +1,21 @@
 """Modo Gaming: optimizaciones temporales y reversibles.
 
-Cada acción declara si necesita privilegios y cómo revertirse.
-La UI pide confirmación antes de aplicar cualquier cambio y guarda
-un snapshot del estado previo para poder restaurarlo.
+Cada acción declara si necesita privilegios y cómo revertirse. Las acciones
+root se agrupan y se ejecutan en UN solo diálogo de pkexec (la UI pide
+confirmación antes y el estado previo queda respaldado).
 """
 
 from __future__ import annotations
 
 import glob
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from linux_optimizer.core import cleaner, hardware
 from linux_optimizer.core.backup import BackupStore
 from linux_optimizer.core.permissions import run, run_privileged
+from linux_optimizer.core.cleaner import build_batch_script, _parse_batch_output
 
 GAMING_BACKUP_KIND = "gaming"
 
@@ -25,8 +26,14 @@ class GamingAction:
     title: str
     description: str
     needs_root: bool
-    apply: object            # Callable[[], tuple[bool, str]]
-    revert: object | None = None  # Callable[[], tuple[bool, str]] | None
+    # Acciones de usuario (sin root): se ejecutan en el proceso actual.
+    apply: object | None = None           # Callable[[], tuple[bool, str]]
+    # Acciones root: comando shell por lotes + pasos de estado en Python.
+    root_command: object | None = None    # Callable[[], str]
+    revert_command: object | None = None  # Callable[[], str]
+    pre_apply: object | None = None       # Callable[[], str | None] (snapshot previo)
+    mark_applied: object | None = None    # Callable[[], str]
+    mark_reverted: object | None = None   # Callable[[], str]
     applied: bool = False
     supported: bool = True
     unsupported_reason: str = ""
@@ -72,19 +79,17 @@ class GamingManager:
                         "Los datos se regeneran solos.",
             needs_root=False,
             apply=apply,
-            revert=None,
         )
 
     def _action_governor(self) -> GamingAction:
         paths = sorted(glob.glob("/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"))
+        action = GamingAction(
+            key="cpu_governor",
+            title="CPU en modo rendimiento",
+            description="Pone el governor de CPU en «performance» durante la sesión de juego.",
+            needs_root=True,
+        )
         if not paths:
-            action = GamingAction(
-                key="cpu_governor",
-                title="CPU en modo rendimiento",
-                description="Pone el governor de CPU en «performance» durante la sesión de juego.",
-                needs_root=True,
-                apply=lambda: (False, "No disponible"),
-            )
             action.supported = False
             action.unsupported_reason = "Este sistema no expone cpufreq (¿VM?)"
             return action
@@ -95,91 +100,99 @@ class GamingManager:
                 governors = fh.read().split()
         except OSError:
             pass
-        action = GamingAction(
-            key="cpu_governor",
-            title="CPU en modo rendimiento",
-            description="Pone el governor de CPU en «performance» durante la sesión de juego.",
-            needs_root=True,
-            apply=self._apply_governor,
-            revert=self._revert_governor,
-        )
         if "performance" not in governors:
             action.supported = False
             action.unsupported_reason = (
                 f"Governors disponibles: {', '.join(governors) or 'desconocidos'}"
             )
+            return action
+
+        def pre_apply() -> str | None:
+            """Guarda el governor actual (lectura sin root) + snapshot en disco."""
+            self._saved_governors = {}
+            for path in paths:
+                try:
+                    with open(path, encoding="utf-8") as fh:
+                        self._saved_governors[path] = fh.read().strip()
+                except OSError:
+                    continue
+            self.backup.snapshot(
+                kind=GAMING_BACKUP_KIND,
+                label="Governor de CPU antes del modo gaming",
+                data={"governors": self._saved_governors},
+            )
+            return None
+
+        def root_command() -> str:
+            return "; ".join(
+                f"echo 'performance' > {p}" for p in paths
+            )
+
+        def mark_applied() -> str:
+            current = _read_governor(paths[0])
+            if current != "performance":
+                return f"⚠ El governor quedó en «{current or 'desconocido'}»"
+            return f"Governor «performance» aplicado en {len(paths)} CPUs"
+
+        def revert_command() -> str:
+            if not self._saved_governors:
+                return "true"
+            return "; ".join(
+                f"echo '{gov}' > {path}" for path, gov in self._saved_governors.items()
+            )
+
+        def mark_reverted() -> str:
+            values = sorted(set(self._saved_governors.values()))
+            self._saved_governors = {}
+            return f"Governor restaurado: {', '.join(values) or 'original'}"
+
+        action.pre_apply = pre_apply
+        action.root_command = root_command
+        action.mark_applied = mark_applied
+        action.revert_command = revert_command
+        action.mark_reverted = mark_reverted
         return action
 
-    def _apply_governor(self) -> tuple[bool, str]:
-        paths = sorted(glob.glob("/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"))
-        # Guardar el estado actual (aplicación + snapshot en disco).
-        self._saved_governors = {}
-        for path in paths:
-            try:
-                with open(path, encoding="utf-8") as fh:
-                    self._saved_governors[path] = fh.read().strip()
-            except OSError:
-                continue
-        self.backup.snapshot(
-            kind=GAMING_BACKUP_KIND,
-            label="Governor de CPU antes del modo gaming",
-            data={"governors": self._saved_governors},
-        )
-        script = "; ".join(
-            f"echo 'performance' > {p}" for p in paths
-        )
-        rc, out, err = run_privileged(["bash", "-c", script], timeout=60)
-        if rc != 0:
-            return False, err.strip() or out.strip() or "pkexec falló"
-        return True, f"Governor «performance» aplicado en {len(paths)} CPUs"
-
-    def _revert_governor(self) -> tuple[bool, str]:
-        if not self._saved_governors:
-            return False, "No hay governor guardado que restaurar"
-        script = "; ".join(
-            f"echo '{gov}' > {path}" for path, gov in self._saved_governors.items()
-        )
-        rc, out, err = run_privileged(["bash", "-c", script], timeout=60)
-        if rc != 0:
-            return False, err.strip() or out.strip()
-        saved = self._saved_governors
-        self._saved_governors = {}
-        values = sorted(set(saved.values()))
-        return True, f"Governor restaurado: {', '.join(values)}"
-
     def _unit_action(self, key: str, unit: str, title: str, description: str) -> GamingAction:
-        rc_active, active_out, _ = run(["systemctl", "is-active", unit], timeout=10)
+        rc_active, _active_out, _ = run(["systemctl", "is-active", unit], timeout=10)
         exists = rc_active in (0, 1, 3)  # active/inactive/failed => la unidad existe
 
-        def apply():
+        def pre_apply() -> str | None:
             self.backup.snapshot(
                 kind=GAMING_BACKUP_KIND,
                 label=f"Antes de detener {unit}",
                 data={"unit": unit},
             )
-            rc, out, err = run_privileged(["systemctl", "stop", unit], timeout=60)
-            if rc != 0:
-                return False, err.strip() or out.strip()
+            return None
+
+        def root_command() -> str:
+            return f"systemctl stop {unit}"
+
+        def mark_applied() -> str:
             if unit not in self._stopped_units:
                 self._stopped_units.append(unit)
-            return True, f"{unit} detenido"
+            return f"{unit} detenido"
 
-        def revert():
+        def revert_command() -> str:
             if unit not in self._stopped_units:
-                return True, f"{unit} no estaba detenido por el modo gaming"
-            rc, out, err = run_privileged(["systemctl", "start", unit], timeout=60)
-            if rc != 0:
-                return False, err.strip() or out.strip()
-            self._stopped_units.remove(unit)
-            return True, f"{unit} reiniciado"
+                return "true"
+            return f"systemctl start {unit}"
+
+        def mark_reverted() -> str:
+            if unit in self._stopped_units:
+                self._stopped_units.remove(unit)
+            return f"{unit} reiniciado"
 
         action = GamingAction(
             key=key,
             title=title,
             description=description,
             needs_root=True,
-            apply=apply,
-            revert=revert,
+            pre_apply=pre_apply,
+            root_command=root_command,
+            mark_applied=mark_applied,
+            revert_command=revert_command,
+            mark_reverted=mark_reverted,
         )
         if not exists:
             action.supported = False
@@ -211,37 +224,104 @@ class GamingManager:
         )
 
     # ------------------------------------------------------------------
-    # Aplicación / reversión
+    # Aplicación / reversión por lotes (un solo diálogo de pkexec)
     # ------------------------------------------------------------------
 
     def apply(self, keys: list[str]) -> tuple[list[str], list[str]]:
         """Aplica las acciones cuyas claves se pasan. Devuelve (éxitos, errores)."""
         ok: list[str] = []
         failed: list[str] = []
-        for action in self.actions:
-            if action.key not in keys or not action.supported:
-                continue
-            success, message = action.apply()
-            if success:
-                action.applied = True
-                ok.append(f"{action.title}: {message}")
-            else:
-                failed.append(f"{action.title}: {message}")
+        selected = [a for a in self.actions
+                    if a.key in keys and a.supported and not a.applied]
+
+        # 1) Acciones de usuario, en el proceso actual.
+        for action in selected:
+            if not action.needs_root and action.apply is not None:
+                success, message = action.apply()
+                if success:
+                    action.applied = True
+                    ok.append(f"{action.title}: {message}")
+                else:
+                    failed.append(f"{action.title}: {message}")
+
+        # 2) Acciones root: snapshots previos + un único pkexec.
+        root_actions = [a for a in selected if a.needs_root and a.root_command is not None]
+        for action in root_actions:
+            try:
+                pre_error = action.pre_apply() if action.pre_apply else None
+                if pre_error:
+                    failed.append(f"{action.title}: {pre_error}")
+            except Exception as exc:  # noqa: BLE001
+                failed.append(f"{action.title}: respaldo previo falló: {exc}")
+                root_actions.remove(action)
+
+        if root_actions:
+            commands = [(a.key, a.root_command()) for a in root_actions]
+            by_key = {a.key: a for a in root_actions}
+            rc, out, err = run_privileged(
+                ["bash", "-c", build_batch_script(commands)], timeout=180,
+            )
+            parsed = _parse_batch_output(out)
+            for key, cmd_rc in parsed.items():
+                action = by_key[key]
+                if cmd_rc == 0:
+                    action.applied = True
+                    ok.append(f"{action.title}: {action.mark_applied()}")
+                else:
+                    failed.append(f"{action.title}: comando falló (rc={cmd_rc})")
+            for action in root_actions:
+                if action.key not in parsed:
+                    if rc == 126 or "dismissed" in (err or "").lower() \
+                            or "not authorized" in (err or "").lower():
+                        failed.append(f"{action.title}: autenticación cancelada")
+                    else:
+                        failed.append(
+                            f"{action.title}: {err.strip() or f'pkexec rc={rc}'}")
         return ok, failed
 
     def revert_all(self) -> tuple[list[str], list[str]]:
         ok: list[str] = []
         failed: list[str] = []
+        root_to_revert = [a for a in self.actions
+                          if a.applied and a.needs_root and a.revert_command is not None]
+
+        # 1) Reversiones de usuario (sin root).
         for action in self.actions:
-            if not action.applied or action.revert is None:
+            if not action.applied or action.needs_root:
                 continue
-            success, message = action.revert()
+            if action.key == "clean_cache":
+                action.applied = False
+                ok.append(f"{action.title}: la caché vaciada no necesita revertirse")
+                continue
+            success, message = action.apply()
             if success:
                 action.applied = False
                 ok.append(f"{action.title}: {message}")
             else:
                 failed.append(f"{action.title}: {message}")
+
+        # 2) Reversiones root en un único pkexec.
+        if root_to_revert:
+            commands = [(a.key, a.revert_command()) for a in root_to_revert]
+            by_key = {a.key: a for a in root_to_revert}
+            rc, out, err = run_privileged(
+                ["bash", "-c", build_batch_script(commands)], timeout=180,
+            )
+            parsed = _parse_batch_output(out)
+            for key, cmd_rc in parsed.items():
+                action = by_key[key]
+                if cmd_rc == 0:
+                    action.applied = False
+                    ok.append(f"{action.title}: {action.mark_reverted()}")
+                else:
+                    failed.append(f"{action.title}: reversión falló (rc={cmd_rc})")
+            for action in root_to_revert:
+                if action.key not in parsed:
+                    failed.append(f"{action.title}: {err.strip() or f'pkexec rc={rc}'}")
         return ok, failed
+
+    def pending_reverts(self) -> int:
+        return sum(1 for a in self.actions if a.applied)
 
     def gamemode_installed(self) -> bool:
         return shutil.which("gamemoded") is not None or shutil.which("gamemode") is not None
@@ -251,6 +331,14 @@ class GamingManager:
         gpus = hardware.detect_gpus()
         gpu_text = ", ".join(g.short() for g in gpus) if gpus else "GPU no detectada"
         return f"{cpu.model} · {gpu_text}"
+
+
+def _read_governor(path: str) -> str:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
 
 
 def _fmt(num: float) -> str:

@@ -179,11 +179,17 @@ class CleanerPage(QWidget):
             f"• {t.title}  {'(sistema, requiere contraseña)' if t.needs_root else ''}"
             for t in chosen
         )
+        has_root = any(t.needs_root for t in chosen)
+        root_note = (
+            "\n\n🔒 Se pedirá tu contraseña UNA sola vez para todos los objetivos de sistema."
+            if has_root else ""
+        )
         confirmed = confirm(
             self,
             "Confirmar limpieza",
             f"Se eliminarán los datos temporales de:\n\n{names}\n\n"
-            "Esta operación no se puede deshacer (los datos borrados no se respaldan).",
+            "Esta operación no se puede deshacer (los datos borrados no se respaldan)."
+            + root_note,
             danger=True,
         )
         if not confirmed:
@@ -193,13 +199,7 @@ class CleanerPage(QWidget):
         self._clean_btn.setText("Limpiando…")
 
         def work():
-            results = []
-            for target in chosen:
-                try:
-                    results.append((target.title, target.clean()))
-                except Exception as exc:  # noqa: BLE001
-                    results.append((target.title, type("R", (), {"error": str(exc), "freed": 0})()))
-            return results
+            return cleaner.clean_batch(chosen)
 
         def done(results):
             self._clean_btn.setEnabled(True)
@@ -207,7 +207,9 @@ class CleanerPage(QWidget):
             freed = 0
             errors = []
             notes = []
-            for title, result in results:
+            for key, result in results.items():
+                title = next(
+                    (t.title for t in self._targets if t.key == key), key)
                 if getattr(result, "error", ""):
                     errors.append(f"{title}: {result.error}")
                 else:
@@ -220,8 +222,9 @@ class CleanerPage(QWidget):
                 summary += "\n" + "\n".join(notes)
             self._status.setText(summary)
             if errors:
-                error_dialog(self, "Limpieza", "Algunos objetivos no se pudieron limpiar "
-                             "(¿cancelaste la contraseña de administrador?).",
+                error_dialog(self, "Limpieza",
+                             "Algunos objetivos no se pudieron limpiar "
+                             "(revisa el mensaje de cada uno):",
                              "\n".join(errors))
             self.scan_all()
 

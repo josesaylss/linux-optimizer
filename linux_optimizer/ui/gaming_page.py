@@ -111,7 +111,9 @@ class GamingPage(QWidget):
         root_actions = [key for key in keys if self._checkboxes[key][1].needs_root]
         message = (
             "Se aplicarán las optimizaciones seleccionadas."
-            + ("\n\nLas acciones marcadas con 🔒 pedirán tu contraseña (pkexec)." if root_actions else "")
+            + ("\n\n🔒 Se pedirá tu contraseña UNA sola vez para todas las "
+               "acciones de sistema, y se guardará un respaldo previo."
+               if root_actions else "")
             + "\n\nPodrás revertir todo con «Salir del modo gaming»."
         )
         if not confirm(self, "Confirmar modo gaming", message, danger=bool(root_actions)):
