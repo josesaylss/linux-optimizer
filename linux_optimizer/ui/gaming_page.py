@@ -55,6 +55,24 @@ class GamingPage(QWidget):
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
 
+        # Acciones rápidas visibles sin desplazar la página.
+        quick = QHBoxLayout()
+        self._hud_btn = QPushButton("Mostrar HUD")
+        self._hud_btn.setCheckable(True)
+        self._hud_btn.setEnabled(self._hud is not None)
+        self._hud_btn.toggled.connect(self._toggle_hud)
+        quick.addWidget(self._hud_btn)
+        self._fps_test_btn = QPushButton("Probar FPS")
+        self._fps_test_btn.setToolTip(
+            "Abre el HUD y lanza glxgears con MangoHud para comprobar que los FPS "
+            "llegan en tiempo real."
+        )
+        self._fps_test_btn.clicked.connect(self._test_fps)
+        self._fps_test_btn.setEnabled(self._fps_pipeline_available())
+        quick.addWidget(self._fps_test_btn)
+        quick.addStretch(1)
+        layout.addLayout(quick)
+
         hardware_info = Card()
         hardware_info.body.addWidget(SectionTitle("Hardware detectado"))
         self._hw_label = QLabel(gaming_manager.hardware_summary())
@@ -94,11 +112,6 @@ class GamingPage(QWidget):
         layout.addWidget(self._status)
 
         buttons = QHBoxLayout()
-        self._hud_btn = QPushButton("Mostrar HUD")
-        self._hud_btn.setCheckable(True)
-        self._hud_btn.setEnabled(self._hud is not None)
-        self._hud_btn.toggled.connect(self._toggle_hud)
-        buttons.addWidget(self._hud_btn)
         buttons.addStretch(1)
         self._revert_btn = QPushButton("Salir del modo gaming")
         buttons.addWidget(self._revert_btn)
@@ -123,14 +136,6 @@ class GamingPage(QWidget):
         fps_hint.setObjectName("headerSubtitle")
         fps_hint.setWordWrap(True)
         fps_card.body.addWidget(fps_hint)
-        self._fps_test_btn = QPushButton("Probar FPS ahora (glxgears)")
-        self._fps_test_btn.setToolTip(
-            "Abre el HUD y lanza glxgears con MangoHud para comprobar que los FPS "
-            "llegan en tiempo real."
-        )
-        self._fps_test_btn.clicked.connect(self._test_fps)
-        self._fps_test_btn.setEnabled(self._fps_pipeline_available())
-        fps_card.body.addWidget(self._fps_test_btn)
         layout.addWidget(fps_card)
 
         scroll = QScrollArea()
