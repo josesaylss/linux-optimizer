@@ -122,6 +122,14 @@ class GamingPage(QWidget):
         fps_hint.setObjectName("headerSubtitle")
         fps_hint.setWordWrap(True)
         fps_card.body.addWidget(fps_hint)
+        self._fps_test_btn = QPushButton("Probar FPS ahora (glxgears)")
+        self._fps_test_btn.setToolTip(
+            "Abre el HUD y lanza glxgears con MangoHud para comprobar que los FPS "
+            "llegan en tiempo real."
+        )
+        self._fps_test_btn.clicked.connect(self._test_fps)
+        self._fps_test_btn.setEnabled(self._fps_pipeline_available())
+        fps_card.body.addWidget(self._fps_test_btn)
         layout.addWidget(fps_card)
 
         scroll = QScrollArea()
@@ -132,6 +140,42 @@ class GamingPage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
 
+    def _fps_pipeline_available(self) -> bool:
+        import shutil
+        return bool(shutil.which("mangohud") and shutil.which("glxgears"))
+
+    def _test_fps(self) -> None:
+        """Lanza un programa de prueba con MangoHud para verificar los FPS."""
+        from PySide6.QtCore import QProcess, QProcessEnvironment
+
+        if self._hud is not None:
+            self._hud.show()
+        log_dir = ensure_mangolog_dir()
+        proc = QProcess(self)
+        env = QProcessEnvironment.systemEnvironment()
+        env.insert(
+            "MANGOHUD_CONFIG",
+            f"output_folder={log_dir},autostart_log=1,log_interval=0",
+        )
+        proc.setProcessEnvironment(env)
+        proc.finished.connect(lambda *_: self._fps_test_btn.setEnabled(True))
+        proc.errorOccurred.connect(
+            lambda *_: (
+                self._fps_test_btn.setEnabled(True),
+                error_dialog(
+                    self,
+                    "Prueba de FPS",
+                    "No se pudo lanzar «mangohud glxgears». Comprueba que MangoHud "
+                    "y glxgears estén instalados.",
+                ),
+            )
+        )
+        self._fps_test_btn.setEnabled(False)
+        self._status.setText(
+            "Prueba de FPS en curso: deberías ver ~60 FPS en el HUD."
+        )
+        proc.start("mangohud", ["glxgears"])
+
     def _fps_hint_text(self) -> str:
         import shutil
         log_dir = ensure_mangolog_dir()
@@ -140,11 +184,13 @@ class GamingPage(QWidget):
                 "✔ MangoHud instalado. Para que este HUD muestre los FPS en tiempo real, "
                 "lanza el juego con el registro de métricas activado:\n\n"
                 "• Steam → Propiedades → Opciones de lanzamiento:\n"
-                f"    MANGOHUD_CONFIG=output_folder={log_dir},autostart_log=0,log_interval=0 "
+                f"    MANGOHUD_CONFIG=output_folder={log_dir},autostart_log=1,log_interval=0 "
                 "mangohud %command%\n"
                 "• Terminal:\n"
-                f"    MANGOHUD_CONFIG=output_folder={log_dir},autostart_log=0,log_interval=0 "
+                f"    MANGOHUD_CONFIG=output_folder={log_dir},autostart_log=1,log_interval=0 "
                 "mangohud <comando-del-juego>\n\n"
+                "⚠ «autostart_log=1» es obligatorio: con 0 MangoHud no escribe el "
+                "registro y el HUD no puede leer los FPS.\n"
                 "Con gamescope también funciona:  gamescope --mangoapp -- <juego>\n"
                 "El HUD detecta el juego automáticamente y actualiza los FPS 2 veces por segundo."
             )

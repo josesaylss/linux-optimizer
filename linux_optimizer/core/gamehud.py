@@ -192,6 +192,10 @@ class MangoAppReader(QThread):
         # recv con timeout 2 s garantiza la salida del hilo pronto.
         self.wait(3000)
 
+    def request_stop(self) -> None:
+        """Pide al hilo que termine sin bloquear el hilo de la interfaz."""
+        self._running = False
+
 
 # ----------------------------------------------------------------------------
 # FPS desde los registros CSV de MangoHud (funciona con `mangohud %command%`)
@@ -259,6 +263,16 @@ class MangoLogReader(QThread):
     metrics_updated = Signal(dict)
 
     POLL_SECS = 0.5
+    # Un registro activo crece muy rápido (~60 líneas/s). Leer sin límite en
+    # un bucle puede acaparar el GIL y congelar la interfaz, así que cada
+    # pasada procesa como máximo este número de líneas.
+    MAX_LINES_PER_PASS = 400
+    # Si el CSV lleva este tiempo sin cambios, el juego ya terminó: no se
+    # siguen emitiendo FPS viejos.
+    STALE_SECS = 5.0
+    # Al abrir un registro largo se salta hasta el final (solo interesa el
+    # último dato) leyendo como mucho este tramo.
+    TAIL_BYTES = 64 * 1024
 
     def __init__(self, directory: Path = MANGO_LOG_DIR, parent=None):
         super().__init__(parent)
@@ -300,18 +314,30 @@ class MangoLogReader(QThread):
                     if found:
                         indices = found
                         break
+                if indices is not None:
+                    # Salta al final: no hace falta recorrer todo el archivo.
+                    try:
+                        size = os.fstat(fh.fileno()).st_size
+                        fh.seek(max(fh.tell(), size - self.TAIL_BYTES))
+                    except OSError:
+                        pass
             if fh is None or indices is None:
                 time.sleep(self.POLL_SECS)
                 continue
             last: dict | None = None
-            while True:
+            for _ in range(self.MAX_LINES_PER_PASS):
                 line = fh.readline()
                 if not line:
                     break
                 parsed = parse_csv_row(line, indices)
                 if parsed:
                     last = parsed
-            if last:
+            fresh = False
+            try:
+                fresh = (time.time() - latest.stat().st_mtime) < self.STALE_SECS
+            except OSError:
+                fresh = False
+            if last and fresh:
                 last["app"] = _app_from_log_name(latest)
                 self.metrics_updated.emit(last)
             time.sleep(self.POLL_SECS)
@@ -321,3 +347,7 @@ class MangoLogReader(QThread):
     def stop(self) -> None:
         self._running = False
         self.wait(3000)
+
+    def request_stop(self) -> None:
+        """Pide al hilo que termine sin bloquear el hilo de la interfaz."""
+        self._running = False

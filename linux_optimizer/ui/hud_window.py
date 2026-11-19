@@ -16,7 +16,10 @@ FPS:
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+import logging
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -27,6 +30,8 @@ from PySide6.QtWidgets import (
 )
 
 from linux_optimizer.core.gamehud import MangoAppReader, MangoLogReader
+
+log = logging.getLogger("LinuxOptimizer.hud")
 
 
 HUD_QSS = """
@@ -156,6 +161,16 @@ class GamingHud(QWidget):
         self._log_reader.metrics_updated.connect(self._on_game_metrics)
         monitor.stats_updated.connect(self._on_system_stats)
 
+        # Repintado periódico: en Wayland una ventana translúcida sin marco a
+        # veces no se redibuja si solo cambian textos; esto evita que el HUD
+        # parezca "congelado".
+        self._repaint_timer = QTimer(self)
+        self._repaint_timer.setInterval(1000)
+        self._repaint_timer.timeout.connect(self.update)
+        self._repaint_timer.start()
+
+        self.setToolTip("Arrastra para mover el HUD · ✕ para cerrarlo")
+
     # ------------------------------------------------------------------
     # Visibilidad
     # ------------------------------------------------------------------
@@ -169,6 +184,13 @@ class GamingHud(QWidget):
 
     def hideEvent(self, event):  # noqa: N802 (Qt)
         super().hideEvent(event)
+        # No se detienen los hilos aquí: esperarlos bloquearía la interfaz
+        # hasta 3 s (causa de que el HUD pareciera "trabado" al cerrarlo).
+        # Siguen leyendo en segundo plano y se paran en shutdown().
+
+    def shutdown(self) -> None:
+        """Detiene los lectores al cerrar la aplicación."""
+        self._repaint_timer.stop()
         self._reader.stop()
         self._log_reader.stop()
 
@@ -223,16 +245,29 @@ class GamingHud(QWidget):
     # ------------------------------------------------------------------
 
     def _begin_drag(self, event) -> None:
+        # Posición de respaldo para el arrastre manual (X11).
+        self._drag_offset = (
+            event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+        )
         window = self.windowHandle()
-        if window is not None and hasattr(window, "startSystemMove"):
+        if window is None:
+            # En Wayland la ventana nativa debe existir antes de pedir el
+            # movimiento al compositor.
+            self.createWinId()
+            window = self.windowHandle()
+        if window is not None:
             try:
                 if window.startSystemMove():
                     self._drag_offset = None
+                    log.info(
+                        "HUD: arrastre gestionado por el compositor (%s)",
+                        QGuiApplication.platformName(),
+                    )
                     return
-            except (AttributeError, RuntimeError):
-                pass
-        self._drag_offset = (
-            event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            except (AttributeError, RuntimeError) as exc:
+                log.info("HUD: startSystemMove no disponible (%s)", exc)
+        log.info(
+            "HUD: arrastre manual (%s)", QGuiApplication.platformName()
         )
 
     def _drag_move(self, event) -> None:

@@ -145,3 +145,23 @@ def test_log_reader_emits_metrics(tmp_path):
     assert received, "no se recibieron métricas del CSV"
     assert received[-1]["fps"] == 62.0
     assert received[-1]["app"] == "juego"
+
+
+def test_log_reader_ignores_stale_log(tmp_path):
+    """Un CSV viejo (juego terminado) no debe seguir emitiendo FPS."""
+    import os
+    import time
+    log_file = tmp_path / "juego_2026-11-18_19-00-00.csv"
+    log_file.write_text("fps,frametime,cpu_load\n50.0,20.0,10\n")
+    old = time.time() - 60
+    os.utime(log_file, (old, old))
+
+    from PySide6.QtCore import Qt
+    received = []
+    reader = MangoLogReader(directory=tmp_path)
+    reader.metrics_updated.connect(
+        lambda d: received.append(d), Qt.ConnectionType.DirectConnection)
+    reader.start()
+    time.sleep(1.5)
+    reader.stop()
+    assert received == []

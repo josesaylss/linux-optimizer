@@ -174,6 +174,7 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentIndex(row)
 
     def closeEvent(self, event):  # noqa: N802 (Qt)
+        self.hud.shutdown()
         self.monitor.stop()
         wait_for_workers()
         super().closeEvent(event)
