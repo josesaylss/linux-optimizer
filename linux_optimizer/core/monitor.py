@@ -64,6 +64,16 @@ def gpu_live_stats(gpus: list[GPUInfo]) -> list[dict]:
     return stats
 
 
+def thread_count() -> int:
+    """Número total de hilos del sistema (cuarto campo de /proc/loadavg)."""
+    try:
+        with open("/proc/loadavg", encoding="ascii") as fh:
+            field = fh.read().split()[3]  # "en_ejecución/total"
+        return int(field.split("/")[1])
+    except (OSError, ValueError, IndexError):
+        return 0
+
+
 class SystemMonitor(QObject):
     """Muestrea el sistema cada N ms y emite `stats_updated` con un dict."""
 
@@ -175,6 +185,7 @@ class SystemMonitor(QObject):
             "temps": temps,
             "gpus": self.gpus and gpu_stats or [],
             "gpu_names": [g.short() for g in self.gpus],
+            "threads": thread_count(),
             "uptime_secs": _uptime(),
         }
         self.stats_updated.emit(stats)
