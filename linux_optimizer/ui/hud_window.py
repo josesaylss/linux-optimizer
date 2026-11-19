@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -43,13 +43,16 @@ log = logging.getLogger("LinuxOptimizer.hud")
 
 
 HUD_QSS = """
+#hudFps, #hudFpsUnit, #hudFrametime, #hudGame, #hudMetric, #hudClose {
+    background: transparent;
+    border: none;
+}
 #hudFps { font-size: 38px; font-weight: 800; }
 #hudFpsUnit { font-size: 11px; font-weight: 700; }
 #hudFrametime { font-size: 10px; }
 #hudGame { font-size: 10px; font-weight: 700; }
 #hudMetric { font-size: 11px; font-weight: 700; }
-#hudClose { color: #ffffff; border: none; background: transparent;
-            font-size: 13px; font-weight: 700; padding: 0; }
+#hudClose { color: #ffffff; font-size: 13px; font-weight: 700; padding: 0; }
 #hudClose:hover { color: #ff8080; }
 """
 
@@ -61,6 +64,12 @@ class OutlinedLabel(QLabel):
                  parent: QWidget | None = None):
         super().__init__(text, parent)
         self._color = QColor(color)
+        # El tema global de la app pinta fondo oscuro en los QLabel; aquí se
+        # anula para que el HUD sea realmente transparente.
+        self.setStyleSheet("background: transparent; border: none;")
+        self.setAutoFillBackground(False)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         # El texto nunca debe capturar el ratón: así el HUD se arrastra
         # desde cualquier punto.
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -79,7 +88,7 @@ class OutlinedLabel(QLabel):
 
         fm = QFontMetrics(self.font())
         width = fm.horizontalAdvance(text)
-        rect = self.rect()
+        rect = self.contentsRect()
         align = int(self.alignment())
         if align & int(Qt.AlignmentFlag.AlignHCenter):
             x = rect.x() + (rect.width() - width) / 2
@@ -154,12 +163,12 @@ class GamingHud(QWidget):
         top = QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(6)
-        self._game_label = OutlinedLabel("SIN JUEGO DETECTADO", "#cfd8ea")
+        self._game_label = OutlinedLabel("SIN JUEGO", "#9fb0cc")
         self._game_label.setObjectName("hudGame")
         top.addWidget(self._game_label, 1)
         close_btn = QPushButton("✕")
         close_btn.setObjectName("hudClose")
-        close_btn.setFixedSize(18, 18)
+        close_btn.setFixedSize(16, 16)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.clicked.connect(self.hide)
         top.addWidget(close_btn, 0, Qt.AlignmentFlag.AlignTop)
@@ -168,23 +177,18 @@ class GamingHud(QWidget):
         # --- FPS ------------------------------------------------------
         fps_row = QHBoxLayout()
         fps_row.setContentsMargins(0, 0, 0, 0)
-        fps_row.setSpacing(4)
+        fps_row.setSpacing(5)
         self._fps_label = OutlinedLabel("—", "#ffffff")
         self._fps_label.setObjectName("hudFps")
         self._fps_label.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        fps_row.addWidget(self._fps_label, 0)
-        unit_col = QVBoxLayout()
-        unit_col.setContentsMargins(0, 0, 0, 0)
-        unit_col.setSpacing(0)
-        unit_col.addStretch(1)
+        fps_row.addWidget(self._fps_label, 0, Qt.AlignmentFlag.AlignBottom)
         self._fps_unit = OutlinedLabel("FPS", "#9fb8e6")
         self._fps_unit.setObjectName("hudFpsUnit")
-        unit_col.addWidget(self._fps_unit)
+        fps_row.addWidget(self._fps_unit, 0, Qt.AlignmentFlag.AlignBottom)
         self._frametime = OutlinedLabel("", "#aeb8cc")
         self._frametime.setObjectName("hudFrametime")
-        unit_col.addWidget(self._frametime)
-        fps_row.addLayout(unit_col, 0)
+        fps_row.addWidget(self._frametime, 0, Qt.AlignmentFlag.AlignBottom)
         fps_row.addStretch(1)
         layout.addLayout(fps_row)
 
@@ -218,10 +222,24 @@ class GamingHud(QWidget):
 
     def showEvent(self, event):  # noqa: N802 (Qt)
         super().showEvent(event)
+        self._align_fps_annotations()
+        QTimer.singleShot(0, self._align_fps_annotations)
         if not self._reader.isRunning():
             self._reader.start()
         if not self._log_reader.isRunning():
             self._log_reader.start()
+
+    def _align_fps_annotations(self) -> None:
+        """Alinea «FPS» y los ms con la línea base del número grande."""
+        height = self._fps_label.height()
+        if not 20 <= height <= 120:
+            return
+        big = self._fps_label.fontMetrics()
+        baseline = (height + big.ascent() - big.descent()) / 2
+        for label in (self._fps_unit, self._frametime):
+            fm = label.fontMetrics()
+            small = int(round(2 * (height - baseline) + fm.ascent() - fm.descent()))
+            label.setFixedHeight(max(small, fm.height()))
 
     def hideEvent(self, event):  # noqa: N802 (Qt)
         super().hideEvent(event)
@@ -264,6 +282,7 @@ class GamingHud(QWidget):
         need = self.sizeHint().width()
         if need > self.width():
             self.resize(need, max(self.height(), self.sizeHint().height()))
+        self._align_fps_annotations()
 
     def _on_system_stats(self, stats: dict) -> None:
         cpu = stats["cpu"]
