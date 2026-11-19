@@ -30,6 +30,7 @@ class GamingPage(QWidget):
         super().__init__(parent)
         self._manager = gaming_manager
         self._hud = hud
+        self._test_closing = False
         # Carpeta donde MangoHud escribirá los FPS en vivo (si no existe).
         try:
             ensure_mangolog_dir()
@@ -146,35 +147,87 @@ class GamingPage(QWidget):
 
     def _test_fps(self) -> None:
         """Lanza un programa de prueba con MangoHud para verificar los FPS."""
-        from PySide6.QtCore import QProcess, QProcessEnvironment
+        import logging
+
+        from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer
+
+        log = logging.getLogger("LinuxOptimizer.gaming")
 
         if self._hud is not None:
             self._hud.show()
         log_dir = ensure_mangolog_dir()
+        cfg = f"output_folder={log_dir},autostart_log=1,log_interval=0"
+
         proc = QProcess(self)
+        proc.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         env = QProcessEnvironment.systemEnvironment()
-        env.insert(
-            "MANGOHUD_CONFIG",
-            f"output_folder={log_dir},autostart_log=1,log_interval=0",
-        )
+        env.insert("MANGOHUD_CONFIG", cfg)
         proc.setProcessEnvironment(env)
-        proc.finished.connect(lambda *_: self._fps_test_btn.setEnabled(True))
-        proc.errorOccurred.connect(
-            lambda *_: (
-                self._fps_test_btn.setEnabled(True),
-                error_dialog(
-                    self,
-                    "Prueba de FPS",
-                    "No se pudo lanzar «mangohud glxgears». Comprueba que MangoHud "
-                    "y glxgears estén instalados.",
-                ),
+        self._test_closing = False
+
+        def log_stderr() -> None:
+            raw = bytes(proc.readAllStandardError()).decode("utf-8", "replace")
+            if raw.strip():
+                log.info("Prueba FPS stderr: %s", raw.strip()[:1500])
+
+        def on_error(error) -> None:
+            log.warning("Prueba FPS error QProcess: %s", error)
+            self._fps_test_btn.setEnabled(True)
+            if self._test_closing:
+                return
+            error_dialog(
+                self, "Prueba de FPS",
+                "No se pudo lanzar «mangohud glxgears». Comprueba que MangoHud "
+                "y glxgears estén instalados.",
             )
-        )
+
+        def on_finished(code, status) -> None:
+            log_stderr()
+            log.info("Prueba FPS terminada: code=%s status=%s", code, status)
+            self._fps_test_btn.setEnabled(True)
+
+        def check_csv() -> None:
+            logs = sorted(log_dir.glob("*.csv"))
+            log.info("Prueba FPS: CSV encontrados=%d (%s)",
+                     len(logs), [p.name for p in logs[-2:]])
+            if not logs:
+                self._status.setText(
+                    "⚠ La prueba no generó registro de FPS. Revisa el aviso de abajo."
+                )
+
+        proc.readyReadStandardError.connect(log_stderr)
+        proc.finished.connect(on_finished)
+        proc.errorOccurred.connect(on_error)
+
         self._fps_test_btn.setEnabled(False)
         self._status.setText(
             "Prueba de FPS en curso: deberías ver ~60 FPS en el HUD."
         )
+        log.info("Prueba FPS: ejecutando mangohud glxgears con MANGOHUD_CONFIG=%s", cfg)
         proc.start("mangohud", ["glxgears"])
+        if not proc.waitForStarted(3000):
+            log.warning("Prueba FPS: no arrancó (%s)", proc.errorString())
+            self._fps_test_btn.setEnabled(True)
+            error_dialog(self, "Prueba de FPS",
+                         f"No se pudo iniciar MangoHud: {proc.errorString()}")
+            return
+        # Deja correr la prueba 15 s y luego la cierra sola.
+        QTimer.singleShot(4000, check_csv)
+        QTimer.singleShot(15000, lambda: self._stop_test(proc))
+
+    def _stop_test(self, proc) -> None:
+        """Cierra el programa de prueba si sigue ejecutándose."""
+        from PySide6.QtCore import QProcess
+
+        try:
+            if proc is None or proc.state() == QProcess.ProcessState.NotRunning:
+                return
+            self._test_closing = True
+            proc.terminate()
+            if not proc.waitForFinished(2000):
+                proc.kill()
+        finally:
+            self._fps_test_btn.setEnabled(True)
 
     def _fps_hint_text(self) -> str:
         import shutil

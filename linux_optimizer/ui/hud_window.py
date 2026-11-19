@@ -1,10 +1,11 @@
 """HUD flotante de rendimiento para el Modo Gaming.
 
-Ventana sin marco, siempre visible y translúcida que muestra FPS reales
-(vía MangoHud) junto con CPU, RAM, GPU y temperatura en vivo.
+Overlay **totalmente transparente y minimalista**: no hay panel, ni borde,
+ni fondo; solo los datos (FPS, CPU, RAM, GPU y temperatura) con un contorno
+oscuro para que se lean sobre cualquier juego.
 
 Arrastre:
-  - Wayland: usa startSystemMove() del compositor (move() no funciona en
+  - Wayland: startSystemMove() del compositor (move() no funciona en
     ventanas de nivel superior en Wayland).
   - X11: movimiento manual con la posición global del ratón.
 
@@ -18,10 +19,17 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import Qt
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QFontMetrics,
+    QGuiApplication,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
 from PySide6.QtWidgets import (
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -35,29 +43,70 @@ log = logging.getLogger("LinuxOptimizer.hud")
 
 
 HUD_QSS = """
-#hudPanel {
-    background-color: rgba(13, 16, 24, 235);
-    border: 1px solid rgba(47, 109, 246, 140);
-    border-radius: 14px;
-}
-#hudTitle { color: #8b95ad; font-size: 10px; font-weight: 700; letter-spacing: 2px; }
-#hudFps { color: #ffffff; font-size: 34px; font-weight: 800; }
-#hudFpsUnit { color: #7fb3ff; font-size: 12px; }
-#hudFrametime { color: #7d879d; font-size: 10px; }
-#hudGame { color: #dfe4ee; font-size: 12px; font-weight: 600; }
-#hudMetric { color: #9aa4bb; font-size: 11px; }
-#hudValue { color: #ffffff; font-size: 13px; font-weight: 700; }
-#hudClose { color: #9aa4bb; border: none; background: transparent; font-size: 13px; padding: 0; }
-#hudClose:hover { color: #ffffff; }
+#hudFps { font-size: 38px; font-weight: 800; }
+#hudFpsUnit { font-size: 11px; font-weight: 700; }
+#hudFrametime { font-size: 10px; }
+#hudGame { font-size: 10px; font-weight: 700; }
+#hudMetric { font-size: 11px; font-weight: 700; }
+#hudClose { color: #ffffff; border: none; background: transparent;
+            font-size: 13px; font-weight: 700; padding: 0; }
+#hudClose:hover { color: #ff8080; }
 """
 
 
+class OutlinedLabel(QLabel):
+    """Texto sin fondo, con contorno oscuro para leerse sobre el juego."""
+
+    def __init__(self, text: str = "", color: str = "#ffffff",
+                 parent: QWidget | None = None):
+        super().__init__(text, parent)
+        self._color = QColor(color)
+        # El texto nunca debe capturar el ratón: así el HUD se arrastra
+        # desde cualquier punto.
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def setTextColor(self, color: str) -> None:
+        self._color = QColor(color)
+        self.update()
+
+    def paintEvent(self, event):  # noqa: N802 (Qt)
+        text = self.text()
+        if not text:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+
+        fm = QFontMetrics(self.font())
+        width = fm.horizontalAdvance(text)
+        rect = self.rect()
+        align = int(self.alignment())
+        if align & int(Qt.AlignmentFlag.AlignHCenter):
+            x = rect.x() + (rect.width() - width) / 2
+        elif align & int(Qt.AlignmentFlag.AlignRight):
+            x = rect.right() - width
+        else:
+            x = rect.x()
+        baseline = rect.y() + (rect.height() + fm.ascent() - fm.descent()) / 2
+
+        path = QPainterPath()
+        path.addText(float(x), float(baseline), self.font(), text)
+        # Contorno negro + relleno: legible sin caja ni fondo.
+        painter.strokePath(
+            path,
+            QPen(QColor(0, 0, 0, 210), 3.4, Qt.PenStyle.SolidLine,
+                 Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin),
+        )
+        painter.fillPath(path, QBrush(self._color))
+
+
 class _HudPanel(QWidget):
-    """Panel que reenvía los eventos del ratón a la ventana para arrastrarla."""
+    """Superficie transparente que reenvía el ratón para arrastrar el HUD."""
 
     def __init__(self, hud: "GamingHud"):
         super().__init__(hud)
         self._hud = hud
+        self.setCursor(Qt.CursorShape.SizeAllCursor)
 
     def mousePressEvent(self, event):  # noqa: N802 (Qt)
         if event.button() == Qt.MouseButton.LeftButton:
@@ -74,7 +123,7 @@ class _HudPanel(QWidget):
 
 
 class GamingHud(QWidget):
-    """Overlay compacto: FPS + CPU + RAM + GPU + temperatura."""
+    """Overlay minimalista: FPS grandes + una línea de métricas."""
 
     def __init__(self, monitor, parent: QWidget | None = None):
         super().__init__(parent)
@@ -83,91 +132,83 @@ class GamingHud(QWidget):
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
+            # No robar el foco al juego al pulsar el HUD para arrastrarlo.
+            | Qt.WindowType.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setStyleSheet(HUD_QSS)
         self._drag_offset = None
         self._monitor = monitor
         self._reader = MangoAppReader()
         self._log_reader = MangoLogReader()
 
         panel = _HudPanel(self)
-        panel.setObjectName("hudPanel")
-        panel.setStyleSheet(HUD_QSS)
-        panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(14, 10, 14, 12)
-        panel_layout.setSpacing(4)
+        self._panel = panel
 
-        # Cabecera
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(0)
+
+        # --- Cabecera: juego + cerrar --------------------------------
         top = QHBoxLayout()
-        title = QLabel("MODO GAMING")
-        title.setObjectName("hudTitle")
-        top.addWidget(title)
-        top.addStretch(1)
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(6)
+        self._game_label = OutlinedLabel("SIN JUEGO DETECTADO", "#cfd8ea")
+        self._game_label.setObjectName("hudGame")
+        top.addWidget(self._game_label, 1)
         close_btn = QPushButton("✕")
         close_btn.setObjectName("hudClose")
-        close_btn.setFixedSize(20, 20)
+        close_btn.setFixedSize(18, 18)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.clicked.connect(self.hide)
-        top.addWidget(close_btn)
-        panel_layout.addLayout(top)
+        top.addWidget(close_btn, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(top)
 
-        # FPS
+        # --- FPS ------------------------------------------------------
         fps_row = QHBoxLayout()
-        self._fps_label = QLabel("—")
+        fps_row.setContentsMargins(0, 0, 0, 0)
+        fps_row.setSpacing(4)
+        self._fps_label = OutlinedLabel("—", "#ffffff")
         self._fps_label.setObjectName("hudFps")
-        self._fps_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        fps_unit = QLabel("FPS")
-        fps_unit.setObjectName("hudFpsUnit")
-        self._frametime = QLabel("")
+        self._fps_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        fps_row.addWidget(self._fps_label, 0)
+        unit_col = QVBoxLayout()
+        unit_col.setContentsMargins(0, 0, 0, 0)
+        unit_col.setSpacing(0)
+        unit_col.addStretch(1)
+        self._fps_unit = OutlinedLabel("FPS", "#9fb8e6")
+        self._fps_unit.setObjectName("hudFpsUnit")
+        unit_col.addWidget(self._fps_unit)
+        self._frametime = OutlinedLabel("", "#aeb8cc")
         self._frametime.setObjectName("hudFrametime")
-        self._frametime.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
-        fps_col = QVBoxLayout()
-        fps_col.addWidget(self._fps_label)
-        fps_col.addWidget(self._frametime)
-        fps_row.addLayout(fps_col, 1)
-        fps_row.addWidget(fps_unit, 0, Qt.AlignmentFlag.AlignBottom)
-        panel_layout.addLayout(fps_row)
+        unit_col.addWidget(self._frametime)
+        fps_row.addLayout(unit_col, 0)
+        fps_row.addStretch(1)
+        layout.addLayout(fps_row)
 
-        self._game_label = QLabel("sin juego con MangoHud detectado")
-        self._game_label.setObjectName("hudGame")
-        panel_layout.addWidget(self._game_label)
-
-        # Métricas
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(16)
-        grid.setVerticalSpacing(2)
-        self._rows: dict[str, QLabel] = {}
-        metrics = [("cpu", "CPU"), ("ram", "RAM"), ("gpu", "GPU"), ("temp", "TEMP")]
-        for i, (key, name) in enumerate(metrics):
-            label = QLabel(name)
-            label.setObjectName("hudMetric")
-            value = QLabel("—")
-            value.setObjectName("hudValue")
-            grid.addWidget(label, i // 2, (i % 2) * 2)
-            grid.addWidget(value, i // 2, (i % 2) * 2 + 1)
+        # --- Métricas en una sola línea -------------------------------
+        metrics_row = QHBoxLayout()
+        metrics_row.setContentsMargins(0, 0, 0, 0)
+        metrics_row.setSpacing(10)
+        self._rows: dict[str, OutlinedLabel] = {}
+        for key in ("cpu", "gpu", "ram", "temp"):
+            value = OutlinedLabel("—", "#f2f5fb")
+            value.setObjectName("hudMetric")
+            metrics_row.addWidget(value, 0)
             self._rows[key] = value
-        panel_layout.addLayout(grid)
-
-        # Los textos no deben capturar el ratón: así se puede arrastrar
-        # desde cualquier punto del panel (el botón ✕ sigue funcionando).
-        for label in panel.findChildren(QLabel):
-            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        metrics_row.addStretch(1)
+        layout.addLayout(metrics_row)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(panel)
 
-        self.resize(240, 150)
+        self.resize(230, 96)
         self._reader.metrics_updated.connect(self._on_game_metrics)
         self._log_reader.metrics_updated.connect(self._on_game_metrics)
         monitor.stats_updated.connect(self._on_system_stats)
-
-        # Repintado periódico: en Wayland una ventana translúcida sin marco a
-        # veces no se redibuja si solo cambian textos; esto evita que el HUD
-        # parezca "congelado".
-        self._repaint_timer = QTimer(self)
-        self._repaint_timer.setInterval(1000)
-        self._repaint_timer.timeout.connect(self.update)
-        self._repaint_timer.start()
 
         self.setToolTip("Arrastra para mover el HUD · ✕ para cerrarlo")
 
@@ -186,11 +227,9 @@ class GamingHud(QWidget):
         super().hideEvent(event)
         # No se detienen los hilos aquí: esperarlos bloquearía la interfaz
         # hasta 3 s (causa de que el HUD pareciera "trabado" al cerrarlo).
-        # Siguen leyendo en segundo plano y se paran en shutdown().
 
     def shutdown(self) -> None:
         """Detiene los lectores al cerrar la aplicación."""
-        self._repaint_timer.stop()
         self._reader.stop()
         self._log_reader.stop()
 
@@ -207,31 +246,40 @@ class GamingHud(QWidget):
             self._fps_label.setText(f"{fps:.0f}")
             frame = payload.get("frametime_ms")
             if frame:
-                self._frametime.setText(f"{frame:.1f} ms por fotograma")
+                self._frametime.setText(f"{frame:.1f} ms")
         name = payload.get("app") or ""
         if name:
-            self._game_label.setText(name)
+            self._game_label.setText(name.upper())
+            self._game_label.setTextColor("#dfe6f4")
+        self._fit_width()
+
+    def _fit_width(self) -> None:
+        """Crece el ancho si el texto actual no cabe (nunca se encoge)."""
+        panel_layout = self._panel.layout()
+        if panel_layout is not None:
+            panel_layout.activate()
+        layout = self.layout()
+        if layout is not None:
+            layout.activate()
+        need = self.sizeHint().width()
+        if need > self.width():
+            self.resize(need, max(self.height(), self.sizeHint().height()))
 
     def _on_system_stats(self, stats: dict) -> None:
         cpu = stats["cpu"]
-        self._rows["cpu"].setText(f"{cpu['percent']:.0f}%")
+        self._rows["cpu"].setText(f"CPU {cpu['percent']:.0f}%")
 
         mem = stats["mem"]
         self._rows["ram"].setText(
-            f"{mem['used'] / 1024**3:.1f}/{mem['total'] / 1024**3:.0f} GB"
+            f"RAM {mem['used'] / 1024**3:.1f}/{mem['total'] / 1024**3:.0f}G"
         )
 
         gpu_stats = stats.get("gpus") or []
         if gpu_stats:
             g = gpu_stats[0]
-            gpu_text = f"{g['util']:.0f}%"
-            if g.get("mem_total_mb"):
-                gpu_text += f" · {g['mem_used_mb']:.0f} MB"
-            if g.get("temp"):
-                gpu_text += f" · {g['temp']:.0f}°C"
-            self._rows["gpu"].setText(gpu_text)
+            self._rows["gpu"].setText(f"GPU {g['util']:.0f}%")
         else:
-            self._rows["gpu"].setText("—")
+            self._rows["gpu"].setText("GPU —")
 
         temps = stats.get("temps") or []
         if temps:
@@ -239,6 +287,7 @@ class GamingHud(QWidget):
             self._rows["temp"].setText(f"{value:.0f}°C")
         else:
             self._rows["temp"].setText("—")
+        self._fit_width()
 
     # ------------------------------------------------------------------
     # Arrastre (Wayland: startSystemMove; X11: move() manual)

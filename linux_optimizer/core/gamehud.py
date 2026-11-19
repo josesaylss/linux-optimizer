@@ -11,6 +11,7 @@ abierto. Si no hay juego con MangoHud, simplemente no recibe datos.
 
 from __future__ import annotations
 
+import logging
 import os
 import socket
 import struct
@@ -20,6 +21,7 @@ from pathlib import Path
 from PySide6.QtCore import QThread, Signal
 
 MANGOAPP_SOCKET = "/tmp/mangoapp"
+log = logging.getLogger("LinuxOptimizer.fps")
 
 
 # ----------------------------------------------------------------------------
@@ -305,6 +307,7 @@ class MangoLogReader(QThread):
                     continue
                 current = str(latest)
                 indices = None
+                log.info("FPS: analizando registro %s", latest.name)
                 # Busca la cabecera entre las primeras líneas.
                 for _ in range(12):
                     line = fh.readline()
@@ -314,7 +317,9 @@ class MangoLogReader(QThread):
                     if found:
                         indices = found
                         break
-                if indices is not None:
+                if indices is None:
+                    log.warning("FPS: %s no tiene cabecera fps,frametime", latest.name)
+                else:
                     # Salta al final: no hace falta recorrer todo el archivo.
                     try:
                         size = os.fstat(fh.fileno()).st_size
