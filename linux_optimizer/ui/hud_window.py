@@ -259,6 +259,14 @@ class GamingHud(QWidget):
     # ------------------------------------------------------------------
 
     def _on_game_metrics(self, payload: dict) -> None:
+        if payload.get("stale"):
+            # El juego terminó: no dejar FPS congelados en pantalla.
+            self._fps_label.setText("—")
+            self._frametime.setText("")
+            self._game_label.setText("SIN JUEGO")
+            self._game_label.setTextColor("#9fb0cc")
+            self._fit_width()
+            return
         fps = payload.get("fps")
         if fps is not None and fps > 0:
             self._fps_label.setText(f"{fps:.0f}")

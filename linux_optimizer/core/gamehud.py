@@ -286,6 +286,7 @@ class MangoLogReader(QThread):
         fh = None
         current: str | None = None
         indices: tuple[int, int] | None = None
+        was_fresh = False
         while self._running:
             latest = find_latest_log(self._dir)
             if latest is None:
@@ -294,6 +295,9 @@ class MangoLogReader(QThread):
                     fh = None
                     current = None
                     indices = None
+                if was_fresh:
+                    self.metrics_updated.emit({"stale": True})
+                    was_fresh = False
                 time.sleep(self.POLL_SECS)
                 continue
             if str(latest) != current:
@@ -345,6 +349,12 @@ class MangoLogReader(QThread):
             if last and fresh:
                 last["app"] = _app_from_log_name(latest)
                 self.metrics_updated.emit(last)
+                was_fresh = True
+            elif was_fresh:
+                # El juego terminó (el registro dejó de crecer): se avisa una
+                # sola vez para que el HUD limpie los FPS en vez de congelarlos.
+                self.metrics_updated.emit({"stale": True})
+                was_fresh = False
             time.sleep(self.POLL_SECS)
         if fh is not None:
             fh.close()

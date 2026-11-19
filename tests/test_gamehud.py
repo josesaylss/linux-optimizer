@@ -165,3 +165,30 @@ def test_log_reader_ignores_stale_log(tmp_path):
     time.sleep(1.5)
     reader.stop()
     assert received == []
+
+
+def test_log_reader_emits_stale_when_log_stops(tmp_path):
+    """Cuando el juego termina, el lector avisa una vez para limpiar el HUD."""
+    import os
+    import time
+    from PySide6.QtCore import Qt
+
+    log_file = tmp_path / "juego_2026-11-18_19-00-00.csv"
+    log_file.write_text("fps,frametime\n50.0,20.0\n")
+    received = []
+    reader = MangoLogReader(directory=tmp_path)
+    reader.metrics_updated.connect(
+        lambda d: received.append(d), Qt.ConnectionType.DirectConnection)
+    reader.start()
+    deadline = time.time() + 4
+    while time.time() < deadline and not received:
+        time.sleep(0.1)
+    assert received, "no llegó la primera lectura"
+
+    old = time.time() - 60
+    os.utime(log_file, (old, old))
+    deadline = time.time() + 4
+    while time.time() < deadline and not any(d.get("stale") for d in received):
+        time.sleep(0.1)
+    reader.stop()
+    assert any(d.get("stale") for d in received), "no se avisó del fin del juego"
