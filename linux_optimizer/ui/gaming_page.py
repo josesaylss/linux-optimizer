@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QCheckBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -28,7 +30,10 @@ class GamingPage(QWidget):
         self._manager = gaming_manager
         self._hud = hud
 
-        layout = QVBoxLayout(self)
+        # Contenido desplazable: si la ventana es baja, se hace scroll en vez
+        # de comprimir las casillas a altura 0 (bug visto en Wayland).
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(24, 18, 24, 18)
         layout.setSpacing(12)
 
@@ -61,6 +66,7 @@ class GamingPage(QWidget):
                 + ("  (no compatible)" if not action.supported else "")
             )
             box.setEnabled(action.supported)
+            box.setMinimumHeight(26)
             if not action.supported:
                 box.setToolTip(action.unsupported_reason)
                 box.setChecked(False)
@@ -111,6 +117,14 @@ class GamingPage(QWidget):
         fps_hint.setWordWrap(True)
         fps_card.body.addWidget(fps_hint)
         layout.addWidget(fps_card)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(content)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
 
     def _fps_hint_text(self) -> str:
         import shutil
