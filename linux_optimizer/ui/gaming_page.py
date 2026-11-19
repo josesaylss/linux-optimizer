@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from linux_optimizer.core.gaming import GamingManager
+from linux_optimizer.core.gamehud import ensure_mangolog_dir
 from linux_optimizer.ui.widgets import (
     Card,
     SectionTitle,
@@ -29,6 +30,11 @@ class GamingPage(QWidget):
         super().__init__(parent)
         self._manager = gaming_manager
         self._hud = hud
+        # Carpeta donde MangoHud escribirá los FPS en vivo (si no existe).
+        try:
+            ensure_mangolog_dir()
+        except OSError:
+            pass
 
         # Contenido desplazable: si la ventana es baja, se hace scroll en vez
         # de comprimir las casillas a altura 0 (bug visto en Wayland).
@@ -128,13 +134,19 @@ class GamingPage(QWidget):
 
     def _fps_hint_text(self) -> str:
         import shutil
+        log_dir = ensure_mangolog_dir()
         if shutil.which("mangohud"):
             return (
-                "✔ MangoHud instalado. Para que el HUD lea los FPS reales, lanza el "
-                "juego con MangoHud:\n"
-                "• Terminal:  mangohud <comando-del-juego>\n"
-                "• Steam:  en Propiedades → Opciones de lanzamiento añade:  mangohud %command%\n"
-                "El HUD se conecta automáticamente al juego detectado."
+                "✔ MangoHud instalado. Para que este HUD muestre los FPS en tiempo real, "
+                "lanza el juego con el registro de métricas activado:\n\n"
+                "• Steam → Propiedades → Opciones de lanzamiento:\n"
+                f"    MANGOHUD_CONFIG=output_folder={log_dir},autostart_log=0,log_interval=0 "
+                "mangohud %command%\n"
+                "• Terminal:\n"
+                f"    MANGOHUD_CONFIG=output_folder={log_dir},autostart_log=0,log_interval=0 "
+                "mangohud <comando-del-juego>\n\n"
+                "Con gamescope también funciona:  gamescope --mangoapp -- <juego>\n"
+                "El HUD detecta el juego automáticamente y actualiza los FPS 2 veces por segundo."
             )
         return ("MangoHud no está instalado; sin él no se pueden leer los FPS del juego. "
                 "Instala el paquete «mangohud» y lanza el juego con «mangohud %command%» en Steam.")

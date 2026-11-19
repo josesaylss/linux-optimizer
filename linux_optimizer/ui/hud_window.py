@@ -1,14 +1,22 @@
 """HUD flotante de rendimiento para el Modo Gaming.
 
 Ventana sin marco, siempre visible y translúcida que muestra FPS reales
-(vía MangoHud) junto con CPU, RAM, GPU y temperatura en vivo. Se puede
-arrastrar con el ratón para colocarla donde no moleste.
+(vía MangoHud) junto con CPU, RAM, GPU y temperatura en vivo.
+
+Arrastre:
+  - Wayland: usa startSystemMove() del compositor (move() no funciona en
+    ventanas de nivel superior en Wayland).
+  - X11: movimiento manual con la posición global del ratón.
+
+FPS:
+  - Socket /tmp/mangoapp (gamescope --mangoapp), si existe.
+  - Registros CSV de MangoHud en ~/.local/state/LinuxOptimizer/mangohud-logs
+    (funciona con `mangohud %command%` + MANGOHUD_CONFIG=output_folder=...).
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -18,8 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from linux_optimizer.core.gamehud import MangoAppReader
-from linux_optimizer.ui.widgets import fmt_bytes, fmt_rate
+from linux_optimizer.core.gamehud import MangoAppReader, MangoLogReader
 
 
 HUD_QSS = """
@@ -40,6 +47,27 @@ HUD_QSS = """
 """
 
 
+class _HudPanel(QWidget):
+    """Panel que reenvía los eventos del ratón a la ventana para arrastrarla."""
+
+    def __init__(self, hud: "GamingHud"):
+        super().__init__(hud)
+        self._hud = hud
+
+    def mousePressEvent(self, event):  # noqa: N802 (Qt)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._hud._begin_drag(event)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):  # noqa: N802 (Qt)
+        self._hud._drag_move(event)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):  # noqa: N802 (Qt)
+        self._hud._drag_offset = None
+        super().mouseReleaseEvent(event)
+
+
 class GamingHud(QWidget):
     """Overlay compacto: FPS + CPU + RAM + GPU + temperatura."""
 
@@ -55,8 +83,9 @@ class GamingHud(QWidget):
         self._drag_offset = None
         self._monitor = monitor
         self._reader = MangoAppReader()
+        self._log_reader = MangoLogReader()
 
-        panel = QWidget(self)
+        panel = _HudPanel(self)
         panel.setObjectName("hudPanel")
         panel.setStyleSheet(HUD_QSS)
         panel_layout = QVBoxLayout(panel)
@@ -113,12 +142,18 @@ class GamingHud(QWidget):
             self._rows[key] = value
         panel_layout.addLayout(grid)
 
+        # Los textos no deben capturar el ratón: así se puede arrastrar
+        # desde cualquier punto del panel (el botón ✕ sigue funcionando).
+        for label in panel.findChildren(QLabel):
+            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(panel)
 
         self.resize(240, 150)
         self._reader.metrics_updated.connect(self._on_game_metrics)
+        self._log_reader.metrics_updated.connect(self._on_game_metrics)
         monitor.stats_updated.connect(self._on_system_stats)
 
     # ------------------------------------------------------------------
@@ -129,10 +164,13 @@ class GamingHud(QWidget):
         super().showEvent(event)
         if not self._reader.isRunning():
             self._reader.start()
+        if not self._log_reader.isRunning():
+            self._log_reader.start()
 
     def hideEvent(self, event):  # noqa: N802 (Qt)
         super().hideEvent(event)
         self._reader.stop()
+        self._log_reader.stop()
 
     def toggle(self) -> None:
         self.hide() if self.isVisible() else self.show()
@@ -181,19 +219,25 @@ class GamingHud(QWidget):
             self._rows["temp"].setText("—")
 
     # ------------------------------------------------------------------
-    # Arrastre
+    # Arrastre (Wayland: startSystemMove; X11: move() manual)
     # ------------------------------------------------------------------
 
-    def mousePressEvent(self, event):  # noqa: N802 (Qt)
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-        super().mousePressEvent(event)
+    def _begin_drag(self, event) -> None:
+        window = self.windowHandle()
+        if window is not None and hasattr(window, "startSystemMove"):
+            try:
+                if window.startSystemMove():
+                    self._drag_offset = None
+                    return
+            except (AttributeError, RuntimeError):
+                pass
+        self._drag_offset = (
+            event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+        )
 
-    def mouseMoveEvent(self, event):  # noqa: N802 (Qt)
-        if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
+    def _drag_move(self, event) -> None:
+        if (
+            self._drag_offset is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
             self.move(event.globalPosition().toPoint() - self._drag_offset)
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event):  # noqa: N802 (Qt)
-        self._drag_offset = None
-        super().mouseReleaseEvent(event)

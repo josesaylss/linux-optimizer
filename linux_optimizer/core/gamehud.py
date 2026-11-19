@@ -15,6 +15,7 @@ import os
 import socket
 import struct
 import time
+from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
@@ -189,4 +190,134 @@ class MangoAppReader(QThread):
     def stop(self) -> None:
         self._running = False
         # recv con timeout 2 s garantiza la salida del hilo pronto.
+        self.wait(3000)
+
+
+# ----------------------------------------------------------------------------
+# FPS desde los registros CSV de MangoHud (funciona con `mangohud %command%`)
+# ----------------------------------------------------------------------------
+
+MANGO_LOG_DIR = Path.home() / ".local/state/LinuxOptimizer/mangohud-logs"
+
+
+def ensure_mangolog_dir() -> Path:
+    """Crea la carpeta donde MangoHud escribirá sus registros CSV."""
+    MANGO_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    return MANGO_LOG_DIR
+
+
+def find_latest_log(directory: Path = MANGO_LOG_DIR) -> Path | None:
+    """Devuelve el CSV de MangoHud más reciente, o None."""
+    try:
+        files = [p for p in directory.glob("*.csv") if p.is_file()]
+    except OSError:
+        return None
+    if not files:
+        return None
+    return max(files, key=lambda p: p.stat().st_mtime)
+
+
+def parse_csv_header(line: str) -> tuple[int, int] | None:
+    """Detecta las columnas fps y frametime en la cabecera CSV de MangoHud."""
+    cleaned = line.strip().lstrip("#").strip()
+    if not cleaned:
+        return None
+    columns = [c.strip().lower() for c in cleaned.split(",")]
+    try:
+        return columns.index("fps"), columns.index("frametime")
+    except ValueError:
+        return None
+
+
+def parse_csv_row(line: str, indices: tuple[int, int]) -> dict | None:
+    """Convierte una fila de datos del CSV en métricas legibles."""
+    fps_idx, ft_idx = indices
+    fields = line.strip().split(",")
+    if len(fields) <= max(indices):
+        return None
+    try:
+        fps = float(fields[fps_idx])
+        frametime = float(fields[ft_idx])
+    except (ValueError, IndexError):
+        return None
+    if fps <= 0:
+        return None
+    return {"fps": fps, "frametime_ms": frametime}
+
+
+def _app_from_log_name(path: Path) -> str:
+    """Extrae el nombre del juego del nombre de archivo del registro."""
+    stem = path.stem
+    # Formato típico: "<juego>_2026-11-18_19-05-33"
+    parts = stem.rsplit("_", 2)
+    return parts[0] if len(parts) == 3 else stem
+
+
+class MangoLogReader(QThread):
+    """Lee el último CSV de MangoHud y emite los FPS en tiempo real."""
+
+    metrics_updated = Signal(dict)
+
+    POLL_SECS = 0.5
+
+    def __init__(self, directory: Path = MANGO_LOG_DIR, parent=None):
+        super().__init__(parent)
+        self._dir = directory
+        self._running = False
+
+    def run(self) -> None:  # pragma: no cover - hilo
+        self._running = True
+        fh = None
+        current: str | None = None
+        indices: tuple[int, int] | None = None
+        while self._running:
+            latest = find_latest_log(self._dir)
+            if latest is None:
+                if fh is not None:
+                    fh.close()
+                    fh = None
+                    current = None
+                    indices = None
+                time.sleep(self.POLL_SECS)
+                continue
+            if str(latest) != current:
+                if fh is not None:
+                    fh.close()
+                try:
+                    fh = open(latest, encoding="utf-8", errors="replace")
+                except OSError:
+                    fh = None
+                    time.sleep(self.POLL_SECS)
+                    continue
+                current = str(latest)
+                indices = None
+                # Busca la cabecera entre las primeras líneas.
+                for _ in range(12):
+                    line = fh.readline()
+                    if not line:
+                        break
+                    found = parse_csv_header(line)
+                    if found:
+                        indices = found
+                        break
+            if fh is None or indices is None:
+                time.sleep(self.POLL_SECS)
+                continue
+            last: dict | None = None
+            while True:
+                line = fh.readline()
+                if not line:
+                    break
+                parsed = parse_csv_row(line, indices)
+                if parsed:
+                    last = parsed
+            if last:
+                last["app"] = _app_from_log_name(latest)
+                self.metrics_updated.emit(last)
+            time.sleep(self.POLL_SECS)
+        if fh is not None:
+            fh.close()
+
+    def stop(self) -> None:
+        self._running = False
         self.wait(3000)
