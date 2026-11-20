@@ -10,7 +10,14 @@ def test_load_defaults_when_missing(tmp_path):
 def test_save_load_roundtrip(tmp_path):
     path = tmp_path / "hud.json"
     save_state({"x": 120, "y": 80, "locked": True}, path)
-    assert load_state(path) == {"x": 120, "y": 80, "locked": True}
+    assert load_state(path) == {
+        "x": 120, "y": 80, "locked": True, "auto_show": True}
+
+
+def test_auto_show_is_preserved(tmp_path):
+    path = tmp_path / "hud.json"
+    save_state({"x": 1, "y": 2, "locked": False, "auto_show": False}, path)
+    assert load_state(path)["auto_show"] is False
 
 
 def test_load_ignores_corrupt_file(tmp_path):

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from linux_optimizer.core.gaming import GamingManager
 from linux_optimizer.core.gamehud import ensure_mangolog_dir
+from linux_optimizer.core.globalfps import global_fps_enabled, set_global_fps
 from linux_optimizer.ui.widgets import (
     Card,
     SectionTitle,
@@ -31,6 +32,10 @@ class GamingPage(QWidget):
         self._manager = gaming_manager
         self._hud = hud
         self._test_closing = False
+        if hud is not None:
+            closed = getattr(hud, "hidden", None)
+            if closed is not None:
+                closed.connect(self._on_hud_closed)
         # Carpeta donde MangoHud escribirá los FPS en vivo (si no existe).
         try:
             ensure_mangolog_dir()
@@ -129,6 +134,15 @@ class GamingPage(QWidget):
         self._hud_auto.setEnabled(self._hud is not None)
         layout.addWidget(self._hud_auto)
 
+        self._hud_game_auto = QCheckBox(
+            "Mostrar el HUD automáticamente al abrir un juego o app")
+        self._hud_game_auto.setChecked(
+            bool(getattr(self._hud, "auto_enabled", False)))
+        self._hud_game_auto.setEnabled(
+            self._hud is not None and hasattr(self._hud, "set_auto_enabled"))
+        self._hud_game_auto.toggled.connect(self._set_hud_auto_show)
+        layout.addWidget(self._hud_game_auto)
+
         # Guía de FPS con MangoHud
         fps_card = Card()
         fps_card.body.addWidget(SectionTitle("FPS en vivo (MangoHud)"))
@@ -136,6 +150,18 @@ class GamingPage(QWidget):
         fps_hint.setObjectName("headerSubtitle")
         fps_hint.setWordWrap(True)
         fps_card.body.addWidget(fps_hint)
+
+        self._global_fps = QCheckBox(
+            "Capturar FPS en todos los juegos y apps (MangoHud global)")
+        self._global_fps.setChecked(global_fps_enabled())
+        self._global_fps.toggled.connect(self._toggle_global_fps)
+        fps_card.body.addWidget(self._global_fps)
+
+        self._global_note = QLabel(self._global_fps_status())
+        self._global_note.setObjectName("headerSubtitle")
+        self._global_note.setWordWrap(True)
+        fps_card.body.addWidget(self._global_note)
+
         layout.addWidget(fps_card)
 
         scroll = QScrollArea()
@@ -158,8 +184,9 @@ class GamingPage(QWidget):
 
         log = logging.getLogger("LinuxOptimizer.gaming")
 
-        if self._hud is not None:
-            self._hud.show()
+        if self._hud is not None and not self._hud_btn.isChecked():
+            # Mantiene el botón de la página sincronizado con el HUD.
+            self._hud_btn.setChecked(True)
         log_dir = ensure_mangolog_dir()
         cfg = f"output_folder={log_dir},autostart_log=1,log_interval=0"
 
@@ -237,23 +264,53 @@ class GamingPage(QWidget):
     def _fps_hint_text(self) -> str:
         import shutil
         log_dir = ensure_mangolog_dir()
-        if shutil.which("mangohud"):
-            return (
-                "✔ MangoHud instalado. Para que este HUD muestre los FPS en tiempo real, "
-                "lanza el juego con el registro de métricas activado:\n\n"
-                "• Steam → Propiedades → Opciones de lanzamiento:\n"
-                f"    MANGOHUD_CONFIG=output_folder={log_dir},autostart_log=1,log_interval=0 "
-                "mangohud %command%\n"
-                "• Terminal:\n"
-                f"    MANGOHUD_CONFIG=output_folder={log_dir},autostart_log=1,log_interval=0 "
-                "mangohud <comando-del-juego>\n\n"
-                "⚠ «autostart_log=1» es obligatorio: con 0 MangoHud no escribe el "
-                "registro y el HUD no puede leer los FPS.\n"
-                "Con gamescope también funciona:  gamescope --mangoapp -- <juego>\n"
-                "El HUD detecta el juego automáticamente y actualiza los FPS 2 veces por segundo."
+        if not shutil.which("mangohud"):
+            return ("MangoHud no está instalado; sin él no se pueden leer los FPS. "
+                    "Instala el paquete «mangohud» (o su versión Flatpak) y vuelve a abrir "
+                    "esta página.")
+        return (
+            "El HUD lee los FPS del registro de MangoHud y detecta el juego solo.\n\n"
+            "✔ Lo más fácil: activa la casilla de abajo y reinicia la sesión una vez. "
+            "Todos los juegos y apps Vulkan (incluidos Proton/DXVK) registrarán FPS "
+            "sin configurar nada más.\n\n"
+            "Alternativa por juego (también sirve para OpenGL):\n"
+            f"    MANGOHUD_CONFIG=output_folder={log_dir},autostart_log=1,log_interval=0 "
+            "mangohud <comando>\n"
+            "⚠ «autostart_log=1» es obligatorio: con 0 MangoHud no escribe el registro.\n"
+            "Con gamescope:  gamescope --mangoapp -- <juego>\n\n"
+            "Para ver el HUD sobre un juego a pantalla completa usa el modo «ventana "
+            "sin bordes»: en GNOME/Wayland una ventana normal no puede dibujarse "
+            "encima de la pantalla completa exclusiva."
+        )
+
+    def _global_fps_status(self) -> str:
+        if global_fps_enabled():
+            return ("✔ Captura global activada. Se aplicará a todos los juegos "
+                    "Vulkan/Proton la próxima vez que inicies sesión (cierra sesión "
+                    "y vuelve a entrar). Si el juego es OpenGL, lánzalo con «mangohud».")
+        return ("Desactivada: solo se registran los FPS de los juegos que lances a "
+                "mano con «mangohud». Actívala para que funcione con todos "
+                "automáticamente.")
+
+    def _toggle_global_fps(self, on: bool) -> None:
+        import logging
+        log = logging.getLogger("LinuxOptimizer.gaming")
+        try:
+            path = set_global_fps(on)
+        except OSError as exc:
+            self._global_fps.blockSignals(True)
+            self._global_fps.setChecked(not on)
+            self._global_fps.blockSignals(False)
+            error_dialog(
+                self, "Captura global de FPS",
+                f"No se pudo escribir la configuración:\n{exc}",
             )
-        return ("MangoHud no está instalado; sin él no se pueden leer los FPS del juego. "
-                "Instala el paquete «mangohud» y lanza el juego con «mangohud %command%» en Steam.")
+            return
+        log.info("FPS global %s (%s)", "activado" if on else "desactivado", path)
+        self._global_note.setText(self._global_fps_status())
+        self._status.setText(
+            "Captura global activada: reinicia la sesión para aplicarla."
+            if on else "Captura global desactivada.")
 
     def _toggle_hud(self, on: bool) -> None:
         if self._hud is None:
@@ -262,6 +319,16 @@ class GamingPage(QWidget):
             self._hud.show()
         else:
             self._hud.hide()
+
+    def _set_hud_auto_show(self, on: bool) -> None:
+        setter = getattr(self._hud, "set_auto_enabled", None)
+        if setter is not None:
+            setter(on)
+
+    def _on_hud_closed(self) -> None:
+        """El HUD se cerró con su ✕: desmarcar el botón de la página."""
+        if self._hud_btn.isChecked():
+            self._hud_btn.setChecked(False)
 
     def _refresh_gamemode(self) -> None:
         if self._manager.gamemode_installed():

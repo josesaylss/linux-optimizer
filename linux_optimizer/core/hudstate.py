@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 
 STATE_PATH = Path.home() / ".local/state/LinuxOptimizer/hud.json"
-DEFAULT_STATE = {"x": None, "y": None, "locked": False}
+DEFAULT_STATE = {"x": None, "y": None, "locked": False, "auto_show": True}
 
 
 def load_state(path: Path = STATE_PATH) -> dict:

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QPointF, Qt, QTimer
+from PySide6.QtCore import QPointF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -177,6 +177,8 @@ class _HudPanel(QWidget):
 class GamingHud(QWidget):
     """Overlay compacto: FPS + GPU + CPU + RAM."""
 
+    closed = Signal()
+
     def __init__(self, monitor, parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle("Linux Optimizer — HUD")
@@ -197,6 +199,15 @@ class GamingHud(QWidget):
         self._log_reader = MangoLogReader()
         self._state = load_state()
         self._locked = bool(self._state.get("locked"))
+        # En Wayland el compositor manda: x()/y() siempre valen 0 y move() no
+        # hace nada. El HUD se lanza en XWayland (xcb) precisamente para que
+        # la posición sea real y se pueda recordar.
+        self._positionable = not QGuiApplication.platformName().startswith(
+            "wayland")
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(400)
+        self._save_timer.timeout.connect(self._save_state)
 
         panel = _HudPanel(self)
         self._panel = panel
@@ -221,7 +232,7 @@ class GamingHud(QWidget):
         close_btn.setObjectName("hudClose")
         close_btn.setFixedSize(16, 16)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.clicked.connect(self.hide)
+        close_btn.clicked.connect(self._close_clicked)
         top.addWidget(close_btn, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(top)
 
@@ -290,16 +301,22 @@ class GamingHud(QWidget):
 
     def showEvent(self, event):  # noqa: N802 (Qt)
         super().showEvent(event)
-        # Recordar dónde lo dejó el usuario (en X11 funcionan las coordenadas;
-        # en Wayland el compositor decide la posición inicial).
-        x, y = self._state.get("x"), self._state.get("y")
-        if x is not None and y is not None:
-            self.move(int(x), int(y))
-            # Algunos compositores aplican su propia colocación justo después
-            # de mapear la ventana; se reintenta una vez y se registra el
-            # resultado para saber si la posición se respetó.
-            QTimer.singleShot(150, lambda: self.move(int(x), int(y)))
-            QTimer.singleShot(700, self._log_position)
+        # Recordar dónde lo dejó el usuario. Solo tiene efecto real cuando la
+        # plataforma permite posicionar ventanas (xcb/X11).
+        if self._positionable:
+            x, y = self._state.get("x"), self._state.get("y")
+            if x is not None and y is not None:
+                self.move(int(x), int(y))
+                QTimer.singleShot(700, self._log_position)
+            else:
+                # Primera vez: esquina superior derecha, como MangoHud.
+                screen = QGuiApplication.primaryScreen()
+                if screen is not None:
+                    area = screen.availableGeometry()
+                    self.move(area.right() - self.width() - 24,
+                              area.top() + 24)
+                    QTimer.singleShot(700, self._log_position)
+        self.raise_()
         self._align_fps_annotations()
         QTimer.singleShot(0, self._align_fps_annotations)
         if not self._reader.isRunning():
@@ -307,22 +324,44 @@ class GamingHud(QWidget):
         if not self._log_reader.isRunning():
             self._log_reader.start()
 
+    def _close_clicked(self) -> None:
+        """✕ del HUD: se oculta y avisa para que el proceso termine."""
+        self.hide()
+        self.closed.emit()
+
     def _log_position(self) -> None:
+        if not self._positionable:
+            log.info("HUD: el compositor (%s) controla la posición",
+                     QGuiApplication.platformName())
+            return
         saved = (self._state.get("x"), self._state.get("y"))
         current = (self.x(), self.y())
         if saved[0] is not None and current != saved:
             log.info(
-                "HUD: el compositor (%s) no permite restaurar la posición "
-                "(guardada %s, actual %s)",
-                QGuiApplication.platformName(), saved, current,
+                "HUD: no se pudo restaurar la posición (guardada %s, "
+                "actual %s) en %s",
+                saved, current, QGuiApplication.platformName(),
             )
         else:
             log.info("HUD: posición restaurada %s (%s)",
                      current, QGuiApplication.platformName())
 
     def _save_state(self) -> None:
-        self._state = {"x": self.x(), "y": self.y(), "locked": self._locked}
-        save_state(self._state)
+        # Se relee el archivo para conservar «auto_show», que puede haberse
+        # cambiado desde la ventana principal.
+        state = load_state()
+        state["locked"] = self._locked
+        if self._positionable:
+            state["x"], state["y"] = self.x(), self.y()
+        self._state = state
+        save_state(state)
+
+    def moveEvent(self, event):  # noqa: N802 (Qt)
+        super().moveEvent(event)
+        if self._positionable:
+            # Guardado con retardo: durante el arrastre hay decenas de eventos
+            # de movimiento y no conviene escribir el JSON en cada uno.
+            self._save_timer.start()
 
     def hideEvent(self, event):  # noqa: N802 (Qt)
         super().hideEvent(event)
