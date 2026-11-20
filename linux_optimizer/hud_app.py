@@ -7,6 +7,8 @@ recordarse entre sesiones incluso en Wayland (a través de XWayland).
 
 from __future__ import annotations
 
+import ctypes
+import os
 import signal
 import sys
 
@@ -17,6 +19,17 @@ from linux_optimizer import APP_NAME
 from linux_optimizer.core.monitor import SystemMonitor
 from linux_optimizer.logging_utils import setup_logging
 from linux_optimizer.ui.hud_window import GamingHud
+
+PR_SET_PDEATHSIG = 1
+
+
+def die_with_parent() -> None:
+    """Que el HUD no quede huérfano si la app principal se cierra de golpe."""
+    try:
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        libc.prctl(PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0)
+    except (OSError, AttributeError):
+        pass
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -43,6 +56,12 @@ def main(argv: list[str] | None = None) -> int:
             signal.signal(sig, _stop)
         except (ValueError, OSError):
             pass
+
+    # Si la app principal muere sin avisar, el HUD la sigue en vez de
+    # quedarse huérfano en pantalla.
+    die_with_parent()
+    if os.getppid() == 1:
+        return 0
 
     # Mantiene a Python al mando del bucle de Qt para atender las señales.
     tick = QTimer()
