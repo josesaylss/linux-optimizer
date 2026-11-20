@@ -78,6 +78,38 @@ class GamingPage(QWidget):
         quick.addStretch(1)
         layout.addLayout(quick)
 
+        # Perfil automático tipo GeForce Experience, adaptado al hardware.
+        auto_card = Card()
+        auto_head = QHBoxLayout()
+        auto_head.addWidget(SectionTitle("Optimización automática"))
+        auto_head.addStretch(1)
+        self._auto_btn = QPushButton("⚡ Optimizar ahora")
+        self._auto_btn.setObjectName("primary")
+        self._auto_btn.clicked.connect(self.apply_recommended)
+        auto_head.addWidget(self._auto_btn)
+        auto_card.body.addLayout(auto_head)
+
+        auto_hint = QLabel(
+            "Como el botón «Optimizar» de GeForce Experience, pero para "
+            "cualquier CPU/GPU: Intel, AMD o NVIDIA. Detecta tu equipo y aplica "
+            "solo lo que admite; todo se revierte con «Salir del modo gaming»."
+        )
+        auto_hint.setObjectName("headerSubtitle")
+        auto_hint.setWordWrap(True)
+        auto_card.body.addWidget(auto_hint)
+
+        self._auto_hw = QLabel(gaming_manager.auto_profile_label())
+        self._auto_hw.setWordWrap(True)
+        auto_card.body.addWidget(self._auto_hw)
+
+        self._auto_status = QLabel(self._auto_profile_text())
+        self._auto_status.setObjectName("headerSubtitle")
+        self._auto_status.setWordWrap(True)
+        self._auto_status.setToolTip(
+            "\n".join(gaming_manager.auto_profile_notes()[1]) or "Todo compatible.")
+        auto_card.body.addWidget(self._auto_status)
+        layout.addWidget(auto_card)
+
         # Controles de FPS y HUD visibles sin desplazar la página.
         self._hud_game_auto = QCheckBox(
             "Mostrar el HUD automáticamente al abrir un juego o app")
@@ -342,12 +374,45 @@ class GamingPage(QWidget):
 
     # ------------------------------------------------------------------
 
+    def _auto_profile_text(self) -> str:
+        usable, skipped = self._manager.auto_profile_notes()
+        text = ("Se aplicará: " + "; ".join(usable) + "."
+                if usable else
+                "No hay mejoras automáticas compatibles con este equipo.")
+        if skipped:
+            titles = [line.split(":", 1)[0] for line in skipped]
+            text += ("\nNo disponible en este equipo: " + ", ".join(titles)
+                     + " (pasa el ratón por encima para ver el motivo).")
+        return text
+
+    def _refresh_auto_status(self) -> None:
+        _usable, skipped = self._manager.auto_profile_notes()
+        self._auto_status.setText(self._auto_profile_text())
+        self._auto_status.setToolTip("\n".join(skipped) or "Todo compatible.")
+
+    def apply_recommended(self) -> None:
+        keys = self._manager.recommended_keys()
+        if not keys:
+            info_dialog(
+                self, "Optimización automática",
+                "No quedan mejoras compatibles por aplicar.\n\n"
+                "Si ya activaste el modo gaming, usa «Salir del modo gaming» "
+                "para revertir los cambios.")
+            return
+        self._apply_keys(keys, self._auto_btn, "⚡ Optimizar ahora",
+                         "Optimización automática")
+
     def apply(self) -> None:
         keys = [key for key, (box, _action) in self._checkboxes.items()
                 if box.isEnabled() and box.isChecked()]
         if not keys:
             info_dialog(self, "Modo gaming", "Selecciona al menos una acción compatible.")
             return
+        self._apply_keys(keys, self._apply_btn, "Activar modo gaming",
+                         "Confirmar modo gaming")
+
+    def _apply_keys(self, keys, button, idle_text: str,
+                    title: str = "Confirmar modo gaming") -> None:
         root_actions = [key for key in keys if self._checkboxes[key][1].needs_root]
         message = (
             "Se aplicarán las optimizaciones seleccionadas."
@@ -356,36 +421,37 @@ class GamingPage(QWidget):
                if root_actions else "")
             + "\n\nPodrás revertir todo con «Salir del modo gaming»."
         )
-        if not confirm(self, "Confirmar modo gaming", message, danger=bool(root_actions)):
+        if not confirm(self, title, message, danger=bool(root_actions)):
             return
 
-        self._apply_btn.setEnabled(False)
-        self._apply_btn.setText("Aplicando…")
+        button.setEnabled(False)
+        button.setText("Aplicando…")
 
         def done(result):
-            self._apply_btn.setEnabled(True)
-            self._apply_btn.setText("Activar modo gaming")
+            button.setEnabled(True)
+            button.setText(idle_text)
             ok, failed = result
             # Sincroniza casillas con el estado real de cada acción.
             for action in self._manager.actions:
                 box = self._checkboxes[action.key][0]
                 if action.supported:
                     box.setChecked(action.applied)
+            self._refresh_auto_status()
             self._status.setText(
                 "✔ Modo gaming activo." if ok else "⚠ No se aplicó ningún cambio."
             )
             if ok and self._hud is not None and self._hud_auto.isChecked():
                 self._hud.show()
                 self._hud_btn.setChecked(True)
-            info_dialog(self, "Modo gaming", "Resultado:",
+            info_dialog(self, title, "Resultado:",
                         "\n".join(ok + failed) or "Sin cambios")
 
         def error(message):
-            self._apply_btn.setEnabled(True)
-            self._apply_btn.setText("Activar modo gaming")
-            error_dialog(self, "Modo gaming", "Error inesperado.", message)
+            button.setEnabled(True)
+            button.setText(idle_text)
+            error_dialog(self, title, "Error inesperado.", message)
 
-        run_worker(self._apply_btn, lambda: self._manager.apply(keys),
+        run_worker(button, lambda: self._manager.apply(keys),
                    done, error, "Aplicando…", self)
 
     def revert(self) -> None:
@@ -396,6 +462,11 @@ class GamingPage(QWidget):
             self._revert_btn.setEnabled(True)
             self._revert_btn.setText("Salir del modo gaming")
             ok, failed = result
+            for action in self._manager.actions:
+                box = self._checkboxes[action.key][0]
+                if action.supported:
+                    box.setChecked(action.applied)
+            self._refresh_auto_status()
             self._status.setText("Modo gaming desactivado.")
             info_dialog(self, "Modo gaming", "Reversión completada:",
                         "\n".join(ok + failed) or "No había cambios que revertir")

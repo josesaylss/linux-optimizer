@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import glob
 import logging
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +40,8 @@ class GamingAction:
     applied: bool = False
     supported: bool = True
     unsupported_reason: str = ""
+    # Forma parte del perfil «Optimizar ahora» (estilo GeForce Experience).
+    recommended: bool = False
 
 
 class GamingManager:
@@ -58,7 +61,10 @@ class GamingManager:
         self.actions = [
             self._action_clean_cache(),
             self._action_governor(),
+            self._action_cpu_epp(),
+            self._action_platform_profile(),
             self._action_amdgpu_performance(),
+            self._action_intel_gpu_performance(),
             self._action_swappiness(),
             self._action_drop_caches(),
             self._action_stop_bluetooth(),
@@ -92,6 +98,7 @@ class GamingManager:
             title="CPU en modo rendimiento",
             description="Pone el governor de CPU en «performance» durante la sesión de juego.",
             needs_root=True,
+            recommended=True,
         )
         if not paths:
             action.supported = False
@@ -157,6 +164,150 @@ class GamingManager:
         action.mark_reverted = mark_reverted
         return action
 
+    def _action_cpu_epp(self) -> GamingAction:
+        """Preferencia de energía: vale para Intel (intel_pstate) y AMD (amd_pstate)."""
+        paths = sorted(glob.glob(
+            "/sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference"))
+        action = GamingAction(
+            key="cpu_epp",
+            title="CPU con preferencia de energía «performance» (Intel y AMD)",
+            description="Ajusta el EPP de la CPU para que priorice rendimiento "
+                        "sobre ahorro de energía. Funciona en Intel y AMD modernos.",
+            needs_root=True,
+            recommended=True,
+        )
+        if not paths:
+            action.supported = False
+            action.unsupported_reason = (
+                "Este kernel no expone energy_performance_preference "
+                "(en AMD hace falta amd_pstate en modo activo)")
+            return action
+        available: list[str] = []
+        try:
+            with open("/sys/devices/system/cpu/cpu0/cpufreq/"
+                      "energy_performance_available_preferences",
+                      encoding="utf-8") as fh:
+                available = fh.read().split()
+        except OSError:
+            pass
+        if available and "performance" not in available:
+            action.supported = False
+            action.unsupported_reason = (
+                f"Preferencias disponibles: {', '.join(available)}")
+            return action
+
+        saved: dict[str, str] = {}
+        self._saved_epp: dict[str, str] = {}
+
+        def pre_apply() -> str | None:
+            nonlocal saved
+            saved = {}
+            for path in paths:
+                value = _read_file(path)
+                if value:
+                    saved[path] = value
+            self.backup.snapshot(
+                kind=GAMING_BACKUP_KIND,
+                label="Preferencia de energía de CPU antes del modo gaming",
+                data={"epp": saved},
+            )
+            self._saved_epp = dict(saved)
+            return None
+
+        def root_command() -> str:
+            return "; ".join(f"echo 'performance' > {p}" for p in paths)
+
+        def mark_applied() -> str:
+            values = {_read_file(p) for p in paths}
+            if values == {"performance"}:
+                return f"EPP «performance» aplicado en {len(paths)} CPUs"
+            return f"⚠ Preferencia actual: {', '.join(sorted(values)) or 'desconocida'}"
+
+        def revert_command() -> str:
+            if not self._saved_epp:
+                return "true"
+            return "; ".join(
+                f"echo '{value}' > {path}"
+                for path, value in self._saved_epp.items())
+
+        def mark_reverted() -> str:
+            values = sorted(set(self._saved_epp.values()))
+            self._saved_epp = {}
+            return f"Preferencia de energía restaurada: {', '.join(values) or 'original'}"
+
+        action.pre_apply = pre_apply
+        action.root_command = root_command
+        action.mark_applied = mark_applied
+        action.revert_command = revert_command
+        action.mark_reverted = mark_reverted
+        return action
+
+    def _action_platform_profile(self) -> GamingAction:
+        """Perfil de energía del firmware (ACPI): portátiles Intel y AMD."""
+        profile_path = "/sys/firmware/acpi/platform_profile"
+        choices_path = "/sys/firmware/acpi/platform_profile_choices"
+        action = GamingAction(
+            key="platform_profile",
+            title="Perfil de energía del equipo en «performance»",
+            description="Pide al firmware (ACPI) el perfil de máximo rendimiento. "
+                        "Habitual en portátiles Intel y AMD.",
+            needs_root=True,
+            recommended=True,
+        )
+        if not os.path.exists(profile_path):
+            action.supported = False
+            action.unsupported_reason = (
+                "El firmware de este equipo no expone platform_profile "
+                "(común en equipos de escritorio)")
+            return action
+        choices: list[str] = []
+        try:
+            with open(choices_path, encoding="utf-8") as fh:
+                choices = fh.read().split()
+        except OSError:
+            pass
+        if choices and "performance" not in choices:
+            action.supported = False
+            action.unsupported_reason = (
+                f"Perfiles disponibles: {', '.join(choices)}")
+            return action
+        self._saved_platform = _read_file(profile_path)
+
+        def pre_apply() -> str | None:
+            self._saved_platform = _read_file(profile_path)
+            self.backup.snapshot(
+                kind=GAMING_BACKUP_KIND,
+                label=f"Perfil de plataforma antes del modo gaming: "
+                      f"{self._saved_platform or 'desconocido'}",
+                data={"platform_profile": self._saved_platform},
+            )
+            return None
+
+        def root_command() -> str:
+            return f"echo 'performance' > {profile_path}"
+
+        def mark_applied() -> str:
+            current = _read_file(profile_path)
+            if current != "performance":
+                return f"⚠ El perfil quedó en «{current or 'desconocido'}»"
+            return "Perfil de plataforma «performance» activado"
+
+        def revert_command() -> str:
+            if not self._saved_platform:
+                return "true"
+            return f"echo '{self._saved_platform}' > {profile_path}"
+
+        def mark_reverted() -> str:
+            value, self._saved_platform = self._saved_platform, ""
+            return f"Perfil de plataforma restaurado a «{value or 'original'}»"
+
+        action.pre_apply = pre_apply
+        action.root_command = root_command
+        action.mark_applied = mark_applied
+        action.revert_command = revert_command
+        action.mark_reverted = mark_reverted
+        return action
+
     def _unit_action(self, key: str, unit: str, title: str, description: str) -> GamingAction:
         rc_active, _active_out, _ = run(["systemctl", "is-active", unit], timeout=10)
         exists = rc_active in (0, 1, 3)  # active/inactive/failed => la unidad existe
@@ -212,6 +363,7 @@ class GamingManager:
             description="Fuerza el nivel de energía de la GPU AMD a «high» durante el juego "
                         "en vez de la gestión automática (revertible).",
             needs_root=True,
+            recommended=True,
         )
         if not paths:
             action.supported = False
@@ -262,6 +414,76 @@ class GamingManager:
         action.mark_reverted = mark_reverted
         return action
 
+    def _action_intel_gpu_performance(self) -> GamingAction:
+        """GPU Intel (i915): sube el techo de frecuencia al máximo (RP0)."""
+        pairs: list[tuple[str, str]] = []
+        for max_path in sorted(
+                glob.glob("/sys/class/drm/card*/device/gt_max_freq_mhz")
+                + glob.glob("/sys/class/drm/card*/gt_max_freq_mhz")):
+            rp0_path = max_path.replace("gt_max_freq_mhz", "gt_RP0_freq_mhz")
+            if os.path.exists(rp0_path):
+                pairs.append((max_path, rp0_path))
+        action = GamingAction(
+            key="intel_gpu_perf",
+            title="GPU Intel al máximo de frecuencia",
+            description="Fija el techo de frecuencia de la GPU Intel en su máximo "
+                        "(RP0). Funciona con el driver i915.",
+            needs_root=True,
+            recommended=True,
+        )
+        if not pairs:
+            action.supported = False
+            action.unsupported_reason = (
+                "No hay GPU Intel con i915 que exponga gt_max_freq_mhz "
+                "(el driver «xe» no usa este control)")
+            return action
+        saved: dict[str, str] = {}
+        self._saved_intel_max: dict[str, str] = {}
+
+        def pre_apply() -> str | None:
+            nonlocal saved
+            saved = {path: _read_file(path) for path, _rp0 in pairs}
+            self._saved_intel_max = dict(saved)
+            self.backup.snapshot(
+                kind=GAMING_BACKUP_KIND,
+                label="Frecuencia máxima de GPU Intel antes del modo gaming",
+                data={"gt_max_freq_mhz": saved},
+            )
+            return None
+
+        def root_command() -> str:
+            commands = []
+            for max_path, rp0_path in pairs:
+                top = _read_file(rp0_path)
+                if top:
+                    commands.append(f"echo '{top}' > {max_path}")
+            return "; ".join(commands) or "true"
+
+        def mark_applied() -> str:
+            current = {path: _read_file(path) for path, _rp0 in pairs}
+            tops = {_read_file(rp0) for _path, rp0 in pairs}
+            if set(current.values()) == tops:
+                return f"GPU Intel fijada a su frecuencia máxima en {len(pairs)} tarjeta(s)"
+            return f"⚠ Frecuencias actuales: {', '.join(sorted(current.values()))}"
+
+        def revert_command() -> str:
+            if not self._saved_intel_max:
+                return "true"
+            return "; ".join(
+                f"echo '{value}' > {path}"
+                for path, value in self._saved_intel_max.items() if value)
+
+        def mark_reverted() -> str:
+            self._saved_intel_max = {}
+            return "Frecuencia de GPU Intel restaurada"
+
+        action.pre_apply = pre_apply
+        action.root_command = root_command
+        action.mark_applied = mark_applied
+        action.revert_command = revert_command
+        action.mark_reverted = mark_reverted
+        return action
+
     def _action_swappiness(self) -> GamingAction:
         def _current() -> int:
             try:
@@ -275,6 +497,7 @@ class GamingManager:
             title="Swappiness bajo (10)",
             description="Reduce el uso de swap durante el juego para evitar micro-tirones.",
             needs_root=True,
+            recommended=True,
         )
         self._saved_swappiness = getattr(self, "_saved_swappiness", None)
 
@@ -466,6 +689,36 @@ class GamingManager:
     def gamemode_installed(self) -> bool:
         return shutil.which("gamemoded") is not None or shutil.which("gamemode") is not None
 
+    # ------------------------------------------------------------------
+    # Perfil automático (estilo GeForce Experience)
+    # ------------------------------------------------------------------
+
+    def recommended_keys(self) -> list[str]:
+        """Acciones del perfil automático compatibles y aún no aplicadas."""
+        return [a.key for a in self.actions
+                if a.recommended and a.supported and not a.applied]
+
+    def auto_profile_notes(self) -> tuple[list[str], list[str]]:
+        """(lo que se aplicará, lo que no está disponible y por qué)."""
+        usable = [a.title for a in self.actions if a.recommended and a.supported]
+        skipped = [f"{a.title}: {a.unsupported_reason}"
+                   for a in self.actions if a.recommended and not a.supported]
+        return usable, skipped
+
+    def auto_profile_label(self) -> str:
+        """Resumen legible del hardware y del perfil que se usará."""
+        cpu_model = hardware.detect_cpu().model
+        cpu = _cpu_vendor(cpu_model)
+        gpus = hardware.detect_gpus()
+        vendors = sorted({g.vendor for g in gpus if g.vendor != "unknown"})
+        gpu_names = {"amd": "AMD", "intel": "Intel", "nvidia": "NVIDIA"}
+        gpu_text = ", ".join(gpu_names.get(v, v) for v in vendors) or "no detectada"
+        notes = []
+        if "nvidia" in vendors:
+            notes.append("NVIDIA: el rendimiento se ajusta con su driver/propietario")
+        return (f"CPU {cpu} · GPU {gpu_text} · se aplicará solo lo compatible "
+                f"con este equipo" + (f" ({'; '.join(notes)})" if notes else ""))
+
     def hardware_summary(self) -> str:
         cpu = hardware.detect_cpu()
         gpus = hardware.detect_gpus()
@@ -479,6 +732,16 @@ def _read_governor(path: str) -> str:
             return fh.read().strip()
     except OSError:
         return ""
+
+
+def _cpu_vendor(model: str) -> str:
+    text = (model or "").lower()
+    if "intel" in text:
+        return "Intel"
+    if any(token in text for token in
+           ("amd", "ryzen", "athlon", "epyc", "threadripper")):
+        return "AMD"
+    return "detectada"
 
 
 def _read_file(path: str) -> str:
