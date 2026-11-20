@@ -32,6 +32,9 @@ def main(argv: list[str] | None = None) -> int:
     hud.closed.connect(app.quit)
 
     def _stop(signum=None, _frame=None) -> None:
+        # Guardar ya: si el controlador se impacienta y manda SIGKILL, la
+        # posición sigue quedando a salvo.
+        hud.save_position()
         app.quit()
 
     # El controlador cierra el HUD con SIGTERM; así se guarda la posición.
@@ -51,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
 
     hud.show()
     monitor.start()
+
     return app.exec()
 
 

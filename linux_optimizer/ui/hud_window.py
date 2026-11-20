@@ -370,10 +370,21 @@ class GamingHud(QWidget):
         # hasta 3 s (causa de que el HUD pareciera "trabado" al cerrarlo).
 
     def shutdown(self) -> None:
-        """Detiene los lectores al cerrar la aplicación."""
+        """Guarda la posición y detiene los lectores sin bloquear la salida."""
+        self.save_position()
+        for reader in (self._reader, self._log_reader):
+            reader.request_stop()
+        for reader in (self._reader, self._log_reader):
+            if not reader.wait(1500):
+                # Mejor terminar el hilo que dejar que Qt aborte el proceso
+                # al destruir un QThread todavía en marcha.
+                reader.terminate()
+                reader.wait(300)
+
+    def save_position(self) -> None:
+        """Guarda posición y bloqueo de inmediato (también al recibir SIGTERM)."""
+        self._save_timer.stop()
         self._save_state()
-        self._reader.stop()
-        self._log_reader.stop()
 
     def toggle(self) -> None:
         self.hide() if self.isVisible() else self.show()

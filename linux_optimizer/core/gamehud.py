@@ -15,6 +15,7 @@ import logging
 import os
 import socket
 import struct
+import threading
 import time
 from pathlib import Path
 
@@ -158,20 +159,22 @@ class MangoAppReader(QThread):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._running = False
+        self._stop_event = threading.Event()
+        self._sock: socket.socket | None = None
 
     def run(self) -> None:  # pragma: no cover - hilo
-        self._running = True
+        self._stop_event.clear()
         sock: socket.socket | None = None
-        while self._running:
+        while not self._stop_event.is_set():
             try:
                 if sock is None:
                     if not os.path.exists(MANGOAPP_SOCKET):
-                        time.sleep(self.RECONNECT_SECS)
+                        self._stop_event.wait(self.RECONNECT_SECS)
                         continue
                     sock = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
                     sock.settimeout(self.RECV_TIMEOUT)
                     sock.connect(MANGOAPP_SOCKET)
+                    self._sock = sock
                 data = sock.recv(4096)
                 if not data:
                     raise ConnectionError("socket cerrado por el juego")
@@ -186,17 +189,24 @@ class MangoAppReader(QThread):
                 except OSError:
                     pass
                 sock = None
-                if self._running:
-                    time.sleep(self.RECONNECT_SECS)
+                self._sock = None
+                self._stop_event.wait(self.RECONNECT_SECS)
 
     def stop(self) -> None:
-        self._running = False
+        self.request_stop()
         # recv con timeout 2 s garantiza la salida del hilo pronto.
         self.wait(3000)
 
     def request_stop(self) -> None:
         """Pide al hilo que termine sin bloquear el hilo de la interfaz."""
-        self._running = False
+        self._stop_event.set()
+        # Desbloquea un recv en curso para que el hilo salga de inmediato.
+        sock = self._sock
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
 
 
 # ----------------------------------------------------------------------------
@@ -279,15 +289,15 @@ class MangoLogReader(QThread):
     def __init__(self, directory: Path = MANGO_LOG_DIR, parent=None):
         super().__init__(parent)
         self._dir = directory
-        self._running = False
+        self._stop_event = threading.Event()
 
     def run(self) -> None:  # pragma: no cover - hilo
-        self._running = True
+        self._stop_event.clear()
         fh = None
         current: str | None = None
         indices: tuple[int, int] | None = None
         was_fresh = False
-        while self._running:
+        while not self._stop_event.is_set():
             latest = find_latest_log(self._dir)
             if latest is None:
                 if fh is not None:
@@ -298,7 +308,7 @@ class MangoLogReader(QThread):
                 if was_fresh:
                     self.metrics_updated.emit({"stale": True})
                     was_fresh = False
-                time.sleep(self.POLL_SECS)
+                self._stop_event.wait(self.POLL_SECS)
                 continue
             if str(latest) != current:
                 if fh is not None:
@@ -307,7 +317,7 @@ class MangoLogReader(QThread):
                     fh = open(latest, encoding="utf-8", errors="replace")
                 except OSError:
                     fh = None
-                    time.sleep(self.POLL_SECS)
+                    self._stop_event.wait(self.POLL_SECS)
                     continue
                 current = str(latest)
                 indices = None
@@ -331,7 +341,7 @@ class MangoLogReader(QThread):
                     except OSError:
                         pass
             if fh is None or indices is None:
-                time.sleep(self.POLL_SECS)
+                self._stop_event.wait(self.POLL_SECS)
                 continue
             last: dict | None = None
             for _ in range(self.MAX_LINES_PER_PASS):
@@ -355,14 +365,14 @@ class MangoLogReader(QThread):
                 # sola vez para que el HUD limpie los FPS en vez de congelarlos.
                 self.metrics_updated.emit({"stale": True})
                 was_fresh = False
-            time.sleep(self.POLL_SECS)
+            self._stop_event.wait(self.POLL_SECS)
         if fh is not None:
             fh.close()
 
     def stop(self) -> None:
-        self._running = False
+        self.request_stop()
         self.wait(3000)
 
     def request_stop(self) -> None:
         """Pide al hilo que termine sin bloquear el hilo de la interfaz."""
-        self._running = False
+        self._stop_event.set()
