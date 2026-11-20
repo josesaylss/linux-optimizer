@@ -99,6 +99,17 @@ class HudController(QObject):
         self._process.start()
 
     def hide(self) -> None:
+        # Ocultar a mano desactiva la reaparición automática durante la
+        # partida actual (si no, volvería a mostrarse 2 s después).
+        self._suppress = True
+        self._auto_started = False
+        self._terminate()
+
+    def _auto_hide(self) -> None:
+        self._auto_started = False
+        self._terminate()
+
+    def _terminate(self) -> None:
         if not self.is_running():
             return
         self._stopping = True
@@ -155,8 +166,7 @@ class HudController(QObject):
         self._suppress = False
         if self._auto_started and self.is_running():
             log.info("HUD: juego terminado, ocultando automáticamente")
-            self._auto_started = False
-            self.hide()
+            self._auto_hide()
 
     # ------------------------------------------------------------------
     # Señales del proceso

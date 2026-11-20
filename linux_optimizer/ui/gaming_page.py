@@ -78,6 +78,27 @@ class GamingPage(QWidget):
         quick.addStretch(1)
         layout.addLayout(quick)
 
+        # Controles de FPS y HUD visibles sin desplazar la página.
+        self._hud_game_auto = QCheckBox(
+            "Mostrar el HUD automáticamente al abrir un juego o app")
+        self._hud_game_auto.setChecked(
+            bool(getattr(self._hud, "auto_enabled", False)))
+        self._hud_game_auto.setEnabled(
+            self._hud is not None and hasattr(self._hud, "set_auto_enabled"))
+        self._hud_game_auto.toggled.connect(self._set_hud_auto_show)
+        layout.addWidget(self._hud_game_auto)
+
+        self._global_fps = QCheckBox(
+            "Capturar FPS en todos los juegos y apps (MangoHud global)")
+        self._global_fps.setChecked(global_fps_enabled())
+        self._global_fps.toggled.connect(self._toggle_global_fps)
+        layout.addWidget(self._global_fps)
+
+        self._global_note = QLabel(self._global_fps_status())
+        self._global_note.setObjectName("headerSubtitle")
+        self._global_note.setWordWrap(True)
+        layout.addWidget(self._global_note)
+
         hardware_info = Card()
         hardware_info.body.addWidget(SectionTitle("Hardware detectado"))
         self._hw_label = QLabel(gaming_manager.hardware_summary())
@@ -134,15 +155,6 @@ class GamingPage(QWidget):
         self._hud_auto.setEnabled(self._hud is not None)
         layout.addWidget(self._hud_auto)
 
-        self._hud_game_auto = QCheckBox(
-            "Mostrar el HUD automáticamente al abrir un juego o app")
-        self._hud_game_auto.setChecked(
-            bool(getattr(self._hud, "auto_enabled", False)))
-        self._hud_game_auto.setEnabled(
-            self._hud is not None and hasattr(self._hud, "set_auto_enabled"))
-        self._hud_game_auto.toggled.connect(self._set_hud_auto_show)
-        layout.addWidget(self._hud_game_auto)
-
         # Guía de FPS con MangoHud
         fps_card = Card()
         fps_card.body.addWidget(SectionTitle("FPS en vivo (MangoHud)"))
@@ -150,17 +162,6 @@ class GamingPage(QWidget):
         fps_hint.setObjectName("headerSubtitle")
         fps_hint.setWordWrap(True)
         fps_card.body.addWidget(fps_hint)
-
-        self._global_fps = QCheckBox(
-            "Capturar FPS en todos los juegos y apps (MangoHud global)")
-        self._global_fps.setChecked(global_fps_enabled())
-        self._global_fps.toggled.connect(self._toggle_global_fps)
-        fps_card.body.addWidget(self._global_fps)
-
-        self._global_note = QLabel(self._global_fps_status())
-        self._global_note.setObjectName("headerSubtitle")
-        self._global_note.setWordWrap(True)
-        fps_card.body.addWidget(self._global_note)
 
         layout.addWidget(fps_card)
 
