@@ -59,7 +59,8 @@ def main() -> int:
         return 1
     images = [(size, render_png(renderer, size)) for size in SIZES]
     ICO_PATH.write_bytes(build_ico(images))
-    print(f"✔ Generado {ICO_PATH} ({ICO_PATH.stat().st_size} bytes)")
+    # ASCII para funcionar también con consolas cp1252 en GitHub Actions.
+    print(f"Generado {ICO_PATH} ({ICO_PATH.stat().st_size} bytes)")
     return 0
 
 

@@ -26,6 +26,8 @@ jobs:
 
       - name: Generar icono
         run: python packaging/windows/make_icon.py
+        env:
+          PYTHONIOENCODING: utf-8
 
       - name: Empaquetar con PyInstaller
         run: python -m PyInstaller --noconfirm --clean packaging/windows/linux-optimizer.spec

@@ -24,7 +24,7 @@ $Python = Join-Path $Venv "Scripts\python.exe"
 Push-Location $Root
 try {
     if (-not (Test-Path $Python)) {
-        Write-Host "Creando entorno virtual en $Venv …"
+        Write-Host "Creando entorno virtual en $Venv ..."
         $Launcher = Get-Command py -ErrorAction SilentlyContinue
         if ($Launcher) {
             & py -3 -m venv $Venv
@@ -37,7 +37,7 @@ try {
     }
 
     if (-not $SkipInstall) {
-        Write-Host "Instalando dependencias …"
+        Write-Host "Instalando dependencias ..."
         & $Python -m pip install --upgrade pip
         & $Python -m pip install -r "packaging\windows\requirements-build.txt"
         if ($LASTEXITCODE -ne 0) {
@@ -45,7 +45,7 @@ try {
         }
     }
 
-    Write-Host "Generando icono .ico …"
+    Write-Host "Generando icono .ico ..."
     & $Python "packaging\windows\make_icon.py"
     if ($LASTEXITCODE -ne 0) {
         throw "No se pudo generar el icono."
@@ -55,7 +55,7 @@ try {
         Remove-Item -Recurse -Force "build\LinuxOptimizer" -ErrorAction SilentlyContinue
     }
 
-    Write-Host "Empaquetando con PyInstaller …"
+    Write-Host "Empaquetando con PyInstaller ..."
     & $Python -m PyInstaller --noconfirm --clean "packaging\windows\linux-optimizer.spec"
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller terminó con error."
@@ -67,7 +67,7 @@ try {
     }
     $Size = [math]::Round((Get-Item $Exe).Length / 1MB, 1)
     Write-Host ""
-    Write-Host "✔ Listo: $Exe ($Size MB)" -ForegroundColor Green
+    Write-Host "[OK] Listo: $Exe ($Size MB)" -ForegroundColor Green
     Write-Host "  Linux Optimizer:            .\dist\LinuxOptimizer.exe"
     Write-Host "  Cortex Gaming Engine:       .\dist\LinuxOptimizer.exe --cortex"
 } finally {
