@@ -64,6 +64,7 @@ def set_plan(guid: str) -> tuple[bool, str]:
     if rc != 0:
         detail = err.strip() or f"powercfg rc={rc}"
         return False, (
-            f"{detail}\n\nSi Windows lo bloquea, ejecuta la aplicación como "
-            "administrador.")
+            f"{detail}\n\nCambiar el plan activo suele funcionar sin elevación. "
+            "Si Windows lo bloquea (directivas de grupo o un plan "
+            "personalizado/oculto), ejecuta la aplicación como administrador.")
     return True, "Plan de energía aplicado."

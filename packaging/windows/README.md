@@ -82,8 +82,11 @@ descomprime en una carpeta temporal.
   panel de NVIDIA, AMD o Intel. No se fuerza ningún valor a ciegas.
 - Swappiness, `max_map_count`, `drop_caches` y governors de CPU no existen en
   Windows; se muestran como «no disponible» en lugar de fallar.
-- Si Windows bloquea `powercfg /setactive`, ejecuta la aplicación como
-  administrador. El resto de funciones no requiere elevación.
+- Cambiar el plan activo con `powercfg /setactive` **normalmente funciona como
+  usuario estándar**. Solo hace falta ejecutar la aplicación como
+  administrador si Windows lo bloquea por directivas de grupo, por un plan
+  personalizado/oculto por el fabricante o en equipos gestionados por la
+  empresa. El resto de funciones nunca requiere elevación.
 
 ## Firma y SmartScreen
 
