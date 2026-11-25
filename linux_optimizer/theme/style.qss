@@ -143,6 +143,23 @@ QPushButton#danger:hover {
     background-color: #93303f;
 }
 
+/* Acceso a Cortex Gaming Engine: acento verde propio, integrado en el tema. */
+QPushButton#cortexLaunch {
+    background-color: #0f2a1d;
+    border: 1px solid #1f5c3d;
+    color: #58f0a0;
+    padding: 8px 16px;
+}
+
+QPushButton#cortexLaunch:hover {
+    background-color: #143a27;
+    border-color: #35e08a;
+}
+
+QPushButton#cortexLaunch:pressed {
+    background-color: #0b2016;
+}
+
 /* ---------- Inputs ---------- */
 
 QLineEdit, QComboBox, QSpinBox {

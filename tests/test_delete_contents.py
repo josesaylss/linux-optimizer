@@ -36,7 +36,10 @@ def test_permisos_suficientes_sin_borrar_nada_reporta_error(cache_dir):
     try:
         res = delete_contents([str(cache_dir)])
         assert res.removed == 0
-        assert "Permission denied" in res.error
+        # El texto del sistema depende de la locale («Permission denied»,
+        # «Permiso denegado»…): basta con que se reporte el error real.
+        assert res.error
+        assert "locked" in res.error
         assert res.note == ""
     finally:
         os.chmod(locked, 0o700)

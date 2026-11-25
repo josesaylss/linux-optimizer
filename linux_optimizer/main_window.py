@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMenu,
+    QPushButton,
     QStackedWidget,
     QSystemTrayIcon,
     QVBoxLayout,
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from linux_optimizer import APP_NAME, __version__
 from linux_optimizer.core.backup import BackupStore
+from linux_optimizer.core.cortex_launcher import launch_cortex
 from linux_optimizer.core.distro import DistroInfo, detect_distro
 from linux_optimizer.core.gaming import GamingManager
 from linux_optimizer.core.monitor import SystemMonitor
@@ -34,6 +36,7 @@ from linux_optimizer.ui.gaming_page import GamingPage
 from linux_optimizer.ui.hud_controller import HudController
 from linux_optimizer.ui.power_page import PowerPage
 from linux_optimizer.ui.services_page import ServicesPage
+from linux_optimizer.ui.widgets import error_dialog
 from linux_optimizer.ui.widgets import Card  # noqa: F401 (estilo común)
 from linux_optimizer.ui.widgets import wait_for_workers
 
@@ -89,13 +92,25 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(24, 18, 24, 12)
         right_layout.setSpacing(14)
 
-        header = QVBoxLayout()
+        header = QHBoxLayout()
+        header_text = QVBoxLayout()
         self._title = QLabel(APP_NAME)
         self._title.setObjectName("headerTitle")
         self._subtitle = QLabel(self.distro.pretty + f"  ·  kernel {platform.release()}")
         self._subtitle.setObjectName("headerSubtitle")
-        header.addWidget(self._title)
-        header.addWidget(self._subtitle)
+        header_text.addWidget(self._title)
+        header_text.addWidget(self._subtitle)
+        header.addLayout(header_text)
+        header.addStretch(1)
+
+        # Único acceso de Linux Optimizer a Cortex Gaming Engine.
+        self._cortex_btn = QPushButton("◈ Cortex Gaming Engine")
+        self._cortex_btn.setObjectName("cortexLaunch")
+        self._cortex_btn.setToolTip(
+            "Abrir Cortex Gaming Engine en su propia ventana independiente")
+        self._cortex_btn.clicked.connect(self._open_cortex)
+        header.addWidget(self._cortex_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+
         right_layout.addLayout(header)
 
         self.stack = QStackedWidget()
@@ -141,6 +156,10 @@ class MainWindow(QMainWindow):
         self.hud.started.connect(self._mark_hud_action)
         menu.addAction(self._action_hud)
         menu.addSeparator()
+        action_cortex = QAction("◈ Cortex Gaming Engine", menu)
+        action_cortex.triggered.connect(self._open_cortex)
+        menu.addAction(action_cortex)
+        menu.addSeparator()
         action_quit = QAction("Salir", menu)
         action_quit.triggered.connect(self.close)
         menu.addAction(action_quit)
@@ -168,6 +187,15 @@ class MainWindow(QMainWindow):
             action.blockSignals(True)
             action.setChecked(True)
             action.blockSignals(False)
+
+    def _open_cortex(self) -> None:
+        """Abre Cortex Gaming Engine como aplicación independiente."""
+        ok, message = launch_cortex()
+        if ok:
+            self.statusBar().showMessage(message, 5000)
+        else:
+            error_dialog(self, "Cortex Gaming Engine", message)
+
     def _build_page(self, page_class):
         if page_class is DashboardPage:
             return DashboardPage(self.monitor, self.distro)

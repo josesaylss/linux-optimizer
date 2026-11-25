@@ -40,6 +40,7 @@ fi
 cd "$SRCDIR"
 mkdir -p %{buildroot}%{_datadir}/%{name}
 cp -a linux_optimizer %{buildroot}%{_datadir}/%{name}/
+cp -a cortex_engine %{buildroot}%{_datadir}/%{name}/
 install -Dm755 run.sh %{buildroot}%{_bindir}/linux-optimizer
 install -Dm644 packaging/linux-optimizer.desktop %{buildroot}%{_datadir}/applications/linux-optimizer.desktop
 sed -i "s|@APPDIR@|%{_datadir}/%{name}|g; s|Exec=.*run.sh|Exec=%{_bindir}/linux-optimizer|" %{buildroot}%{_datadir}/applications/linux-optimizer.desktop

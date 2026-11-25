@@ -14,6 +14,7 @@ dependencies = [
 
 [project.scripts]
 linux-optimizer = "linux_optimizer.app:main"
+cortex-gaming-engine = "cortex_engine.main:main"
 
 [tool.setuptools.packages.find]
-include = ["linux_optimizer*"]
+include = ["linux_optimizer*", "cortex_engine*"]

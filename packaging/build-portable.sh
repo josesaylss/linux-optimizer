@@ -17,6 +17,7 @@ mkdir -p "$STAGE_NAME"
 
 # Código del paquete + lanzador + instalador de menú.
 cp -a linux_optimizer "$STAGE_NAME/"
+cp -a cortex_engine "$STAGE_NAME/"
 cp run.sh "$STAGE_NAME/"
 cp packaging/install-desktop.sh "$STAGE_NAME/install-menu.sh"
 cp requirements.txt "$STAGE_NAME/"
