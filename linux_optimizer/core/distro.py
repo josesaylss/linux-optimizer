@@ -11,7 +11,9 @@ import os
 import platform
 from dataclasses import dataclass
 
-FAMILIES = ("fedora", "debian", "arch", "unknown")
+from linux_optimizer.core import platform_info
+
+FAMILIES = ("fedora", "debian", "arch", "windows", "unknown")
 
 
 @dataclass(frozen=True)
@@ -120,6 +122,15 @@ def classify(distro_id: str) -> str:
 
 
 def detect_distro(os_release_path: str = "/etc/os-release") -> DistroInfo:
+    if platform_info.IS_WINDOWS:
+        return DistroInfo(
+            name="Windows",
+            version=platform.release(),
+            family="windows",
+            package_manager="winget",
+            desktop="Escritorio",
+            is_supported=True,
+        )
     data = read_os_release(os_release_path)
     distro_id = data.get("ID", "") or platform.system().lower()
     name = data.get("PRETTY_NAME") or data.get("NAME") or distro_id.capitalize()

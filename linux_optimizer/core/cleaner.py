@@ -12,10 +12,12 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from linux_optimizer.core.permissions import run_privileged
+from linux_optimizer.core import platform_info
+from linux_optimizer.core.permissions import run, run_privileged
 
 
 @dataclass
@@ -258,10 +260,123 @@ def _flatpak_unused_scan() -> ScanResult:
 
 
 # ----------------------------------------------------------------------------
+# Objetivos específicos de Windows
+# ----------------------------------------------------------------------------
+
+def _windows_local_appdata() -> Path:
+    base = os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local"
+    return Path(base)
+
+
+def _scan_windows_temp() -> ScanResult:
+    return dir_stats([tempfile.gettempdir()])
+
+
+def _clean_windows_temp() -> CleanResult:
+    return delete_contents([tempfile.gettempdir()])
+
+
+def _windows_thumbnail_files() -> list[str]:
+    explorer = _windows_local_appdata() / "Microsoft" / "Windows" / "Explorer"
+    return [str(path) for path in explorer.glob("thumbcache_*.db")]
+
+
+def _scan_windows_thumbnails() -> ScanResult:
+    files = _windows_thumbnail_files()
+    result = ScanResult(files=len(files))
+    for path in files:
+        try:
+            result.size += os.path.getsize(path)
+        except OSError:
+            pass
+    if not files:
+        result.note = "Windows no tiene caché de miniaturas o ya está limpia"
+    return result
+
+
+def _clean_windows_thumbnails() -> CleanResult:
+    result = CleanResult()
+    for path in _windows_thumbnail_files():
+        try:
+            size = os.path.getsize(path)
+            os.unlink(path)
+        except OSError:
+            continue
+        result.freed += size
+        result.removed += 1
+    if result.removed == 0:
+        result.note = "El Explorador mantiene las miniaturas en uso; se limpiarán al cerrarlo"
+    return result
+
+
+def _scan_recycle_bin() -> ScanResult:
+    """Tamaño aproximado de la papelera de reciclaje (PowerShell)."""
+    drive = os.environ.get("SystemDrive", "C:")
+    command = (
+        "$total = 0; Get-ChildItem -Force -LiteralPath "
+        f"'{drive}\\$Recycle.Bin' -Recurse -File -ErrorAction SilentlyContinue | "
+        "ForEach-Object { $total += $_.Length }; Write-Output $total")
+    rc, out, err = run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+        timeout=45,
+    )
+    if rc != 0:
+        return ScanResult(note="No se pudo leer la papelera de reciclaje")
+    try:
+        size = int((out or "0").strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        size = 0
+    return ScanResult(size=size)
+
+
+def _clean_recycle_bin() -> CleanResult:
+    rc, out, err = run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+         "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"],
+        timeout=120,
+    )
+    if rc != 0:
+        return CleanResult(error=err.strip() or "No se pudo vaciar la papelera")
+    return CleanResult(note="Papelera de reciclaje vaciada")
+
+
+def build_windows_targets() -> list[CleanTarget]:
+    """Objetivos seguros y regenerables en Windows (sin tocar documentos)."""
+    return [
+        CleanTarget(
+            key="user_temp",
+            title="Archivos temporales de Windows (%TEMP%)",
+            description="Archivos temporales de usuario; Windows los regenera.",
+            needs_root=False,
+            scan=_scan_windows_temp,
+            clean=_clean_windows_temp,
+        ),
+        CleanTarget(
+            key="thumbnails",
+            title="Caché de miniaturas del Explorador",
+            description="Miniaturas regenerables; se reconstruyen al abrir carpetas.",
+            needs_root=False,
+            scan=_scan_windows_thumbnails,
+            clean=_clean_windows_thumbnails,
+        ),
+        CleanTarget(
+            key="trash",
+            title="Papelera de reciclaje",
+            description="Archivos eliminados que siguen ocupando espacio.",
+            needs_root=False,
+            scan=_scan_recycle_bin,
+            clean=_clean_recycle_bin,
+        ),
+    ]
+
+
+# ----------------------------------------------------------------------------
 # Construcción de objetivos
 # ----------------------------------------------------------------------------
 
 def build_targets(distro_family: str) -> list[CleanTarget]:
+    if platform_info.IS_WINDOWS:
+        return build_windows_targets()
     home_cache = _user_home_subdir(".cache")
     targets = [
         CleanTarget(

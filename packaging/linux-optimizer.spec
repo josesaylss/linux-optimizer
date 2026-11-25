@@ -43,7 +43,9 @@ cp -a linux_optimizer %{buildroot}%{_datadir}/%{name}/
 cp -a cortex_engine %{buildroot}%{_datadir}/%{name}/
 install -Dm755 run.sh %{buildroot}%{_bindir}/linux-optimizer
 install -Dm644 packaging/linux-optimizer.desktop %{buildroot}%{_datadir}/applications/linux-optimizer.desktop
-sed -i "s|@APPDIR@|%{_datadir}/%{name}|g; s|Exec=.*run.sh|Exec=%{_bindir}/linux-optimizer|" %{buildroot}%{_datadir}/applications/linux-optimizer.desktop
+# Sustituye el lanzador conservando los argumentos de cada entrada (p. ej.
+# "--cortex" en la acción del menú de Cortex Gaming Engine).
+sed -i "s|@APPDIR@/run.sh|%{_bindir}/linux-optimizer|g; s|@APPDIR@|%{_datadir}/%{name}|g" %{buildroot}%{_datadir}/applications/linux-optimizer.desktop
 install -Dm644 linux_optimizer/resources/linux-optimizer.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/linux-optimizer.svg
 
 %files

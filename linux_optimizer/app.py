@@ -23,6 +23,15 @@ def _setup_logging() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
+
+    # Una sola aplicación, dos sesiones: Linux Optimizer y Cortex Gaming
+    # Engine. ``--cortex`` abre la otra sesión de esta misma aplicación
+    # (con su propia ventana y proceso).
+    if "--cortex" in argv:
+        argv = [arg for arg in argv if arg != "--cortex"]
+        from cortex_engine.main import main as cortex_main
+        return cortex_main(argv)
+
     _setup_logging()
     app = QApplication(argv)
     app.setApplicationName(APP_NAME)

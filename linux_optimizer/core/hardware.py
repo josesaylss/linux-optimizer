@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 
 import psutil
 
+from linux_optimizer.core import platform_info
+
 
 @dataclass(frozen=True)
 class GPUInfo:
@@ -167,7 +169,54 @@ def _gpus_from_sysfs() -> list[GPUInfo]:
     return gpus
 
 
+def _gpus_from_windows() -> list[GPUInfo]:
+    """GPUs en Windows vía PowerShell CIM (sin dependencias externas)."""
+    commands = [
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+         "Get-CimInstance Win32_VideoController | "
+         "ForEach-Object { $_.Name }"],
+        ["wmic", "path", "win32_VideoController", "get", "name"],
+    ]
+    names: list[str] = []
+    for command in commands:
+        try:
+            proc = subprocess.run(command, capture_output=True, text=True,
+                                  timeout=15, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if proc.returncode != 0:
+            continue
+        for line in proc.stdout.splitlines():
+            value = line.strip()
+            if not value or value.lower() == "name":
+                continue
+            names.append(value)
+        if names:
+            break
+
+    gpus: list[GPUInfo] = []
+    seen: set[str] = set()
+    for name in names:
+        low = name.lower()
+        if "nvidia" in low:
+            vendor = "nvidia"
+        elif "amd" in low or "radeon" in low:
+            vendor = "amd"
+        elif "intel" in low:
+            vendor = "intel"
+        else:
+            vendor = "unknown"
+        key = (name, vendor)
+        if key in seen:
+            continue
+        seen.add(key)
+        gpus.append(GPUInfo(name=name, vendor=vendor, driver="wddm"))
+    return gpus
+
+
 def detect_gpus() -> list[GPUInfo]:
+    if platform_info.IS_WINDOWS:
+        return _gpus_from_windows()
     gpus = _gpus_from_lspci() or _gpus_from_sysfs()
     if not gpus:
         return []
@@ -236,6 +285,8 @@ def _read_int_sysfs(path: str) -> float | None:
 
 def sysfs_gpu_stats(gpu: GPUInfo) -> dict | None:
     """Estadísticas en vivo desde sysfs (amdgpu: gpu_busy_percent, VRAM, hwmon)."""
+    if platform_info.IS_WINDOWS or not gpu.sysfs_path:
+        return None
     base = gpu.sysfs_path
     if not base or not os.path.isdir(base):
         return None

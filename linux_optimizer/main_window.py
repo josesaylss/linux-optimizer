@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from linux_optimizer import APP_NAME, __version__
+from linux_optimizer.core import platform_info
 from linux_optimizer.core.backup import BackupStore
 from linux_optimizer.core.cortex_launcher import launch_cortex
 from linux_optimizer.core.distro import DistroInfo, detect_distro
@@ -50,6 +51,17 @@ _PAGES = (
     ("ℹ️", "Acerca de", AboutPage),
 )
 
+# En Windows se ocultan las páginas que dependen de systemd/sysfs/pkexec.
+# Cortex Gaming Engine sigue disponible desde el botón de la cabecera.
+_PAGES_WINDOWS = tuple(
+    entry for entry in _PAGES
+    if entry[2] not in (GamingPage, ServicesPage, PowerPage)
+)
+
+
+def pages_for_platform() -> tuple:
+    return _PAGES_WINDOWS if platform_info.IS_WINDOWS else _PAGES
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -61,8 +73,13 @@ class MainWindow(QMainWindow):
         self.distro: DistroInfo = detect_distro()
         self.backup_store = BackupStore()
         self.monitor = SystemMonitor()
-        self.gaming_manager = GamingManager(self.backup_store)
-        self.hud = HudController(self)
+        if platform_info.IS_WINDOWS:
+            self.gaming_manager = None
+            self.hud = None
+        else:
+            self.gaming_manager = GamingManager(self.backup_store)
+            self.hud = HudController(self)
+        self._pages_spec = pages_for_platform()
 
         central = QWidget()
         root = QHBoxLayout(central)
@@ -76,7 +93,7 @@ class MainWindow(QMainWindow):
         self.sidebar.setFixedWidth(230)
         self.sidebar.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        for icon, name, _page in _PAGES:
+        for icon, name, _page in self._pages_spec:
             item = QListWidgetItem(f"{icon}   {name}")
             item.setSizeHint(QSize(200, 44))
             self.sidebar.addItem(item)
@@ -107,7 +124,7 @@ class MainWindow(QMainWindow):
         self._cortex_btn = QPushButton("◈ Cortex Gaming Engine")
         self._cortex_btn.setObjectName("cortexLaunch")
         self._cortex_btn.setToolTip(
-            "Abrir Cortex Gaming Engine en su propia ventana independiente")
+            "Abrir Cortex Gaming Engine en otra sesión de esta misma aplicación")
         self._cortex_btn.clicked.connect(self._open_cortex)
         header.addWidget(self._cortex_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -121,7 +138,7 @@ class MainWindow(QMainWindow):
 
         # ---------------- Páginas ----------------
         self._pages = []
-        for icon, name, page_class in _PAGES:
+        for icon, name, page_class in self._pages_spec:
             page = self._build_page(page_class)
             self._pages.append(page)
             self.stack.addWidget(page)
@@ -147,14 +164,15 @@ class MainWindow(QMainWindow):
         action_toggle = QAction("Mostrar / ocultar", menu)
         action_toggle.triggered.connect(self._toggle_visible)
         menu.addAction(action_toggle)
-        self._action_hud = QAction("HUD de rendimiento", menu)
-        self._action_hud.setCheckable(True)
-        self._action_hud.setChecked(False)
-        self._action_hud.toggled.connect(
-            lambda on: self.hud.show() if on else self.hud.hide())
-        self.hud.hidden.connect(self._sync_hud_action)
-        self.hud.started.connect(self._mark_hud_action)
-        menu.addAction(self._action_hud)
+        if self.hud is not None:
+            self._action_hud = QAction("HUD de rendimiento", menu)
+            self._action_hud.setCheckable(True)
+            self._action_hud.setChecked(False)
+            self._action_hud.toggled.connect(
+                lambda on: self.hud.show() if on else self.hud.hide())
+            self.hud.hidden.connect(self._sync_hud_action)
+            self.hud.started.connect(self._mark_hud_action)
+            menu.addAction(self._action_hud)
         menu.addSeparator()
         action_cortex = QAction("◈ Cortex Gaming Engine", menu)
         action_cortex.triggered.connect(self._open_cortex)
@@ -189,7 +207,7 @@ class MainWindow(QMainWindow):
             action.blockSignals(False)
 
     def _open_cortex(self) -> None:
-        """Abre Cortex Gaming Engine como aplicación independiente."""
+        """Abre la sesión Cortex Gaming Engine de esta misma aplicación."""
         ok, message = launch_cortex()
         if ok:
             self.statusBar().showMessage(message, 5000)
@@ -218,7 +236,8 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentIndex(row)
 
     def closeEvent(self, event):  # noqa: N802 (Qt)
-        self.hud.shutdown()
+        if self.hud is not None:
+            self.hud.shutdown()
         self.monitor.stop()
         wait_for_workers()
         super().closeEvent(event)

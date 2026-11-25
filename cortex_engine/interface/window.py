@@ -1,7 +1,8 @@
-"""Ventana principal de Cortex Gaming Engine.
+"""Ventana de la sesión Cortex Gaming Engine.
 
-Es una ventana completamente independiente: no comparte barra lateral, tema,
-configuración ni monitor con Linux Optimizer.
+Cortex es una sesión de la misma aplicación que Linux Optimizer: conserva su
+propia barra lateral, tema, configuración, monitor y registro, y se abre con
+``linux-optimizer --cortex`` en su propia ventana.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -23,6 +25,7 @@ from PySide6.QtWidgets import (
 from cortex_engine import APP_NAME, APP_VERSION
 from cortex_engine.config import CortexConfig
 from cortex_engine.cpu.module import CpuModule
+from cortex_engine.cpu.windows_module import WindowsCpuModule
 from cortex_engine.gaming.booster import GameBooster
 from cortex_engine.gpu.module import GpuModule
 from cortex_engine.interface.pages import (
@@ -36,12 +39,16 @@ from cortex_engine.interface.pages import (
     SettingsPage,
 )
 from cortex_engine.memory.module import MemoryModule
+from cortex_engine.memory.windows import WindowsMemoryModule
 from cortex_engine.monitoring.activity import ActivityLog
 from cortex_engine.monitoring.engine import CortexMonitor
 from cortex_engine.profiles.manager import ProfileManager, PROFILE_MAP
+from cortex_engine.profiles.windows import WindowsProfileManager
 from cortex_engine.restore.store import RestoreStore
+from linux_optimizer.core import platform_info
+from linux_optimizer.core.cortex_launcher import launch_optimizer
 from linux_optimizer.resources import ICON_PATH
-from linux_optimizer.ui.widgets import wait_for_workers
+from linux_optimizer.ui.widgets import error_dialog, wait_for_workers
 
 
 class CortexWindow(QMainWindow):
@@ -55,17 +62,24 @@ class CortexWindow(QMainWindow):
         self.setMinimumSize(QSize(940, 600))
         self.setWindowIcon(QIcon(str(ICON_PATH)))
 
-        # ---------------- Motor independiente ----------------
+        # ---------------- Motor de la sesión Cortex ----------------
         self.config = config if config is not None else CortexConfig()
         self.activity = ActivityLog()
         self.store = RestoreStore()
-        self.cpu = CpuModule()
-        self.gpu = GpuModule()
-        self.memory = MemoryModule()
+        if platform_info.IS_WINDOWS:
+            self.cpu = WindowsCpuModule()
+            self.gpu = GpuModule()
+            self.memory = WindowsMemoryModule()
+            self.profiles = WindowsProfileManager(
+                self.config, self.activity, self.store)
+        else:
+            self.cpu = CpuModule()
+            self.gpu = GpuModule()
+            self.memory = MemoryModule()
+            self.profiles = ProfileManager(
+                self.config, self.activity, self.cpu, self.gpu, self.memory,
+                self.store)
         self.booster = GameBooster(activity=self.activity)
-        self.profiles = ProfileManager(
-            self.config, self.activity, self.cpu, self.gpu, self.memory,
-            self.store)
         self.monitor = CortexMonitor(
             int(self.config.get("monitor_interval_ms", 1500)), self)
 
@@ -139,6 +153,14 @@ class CortexWindow(QMainWindow):
         header_layout.addLayout(titles)
         header_layout.addStretch(1)
 
+        # Misma aplicación, otra sesión: volver a Linux Optimizer.
+        self._optimizer_btn = QPushButton("Linux Optimizer")
+        self._optimizer_btn.setObjectName("sessionSwitch")
+        self._optimizer_btn.setToolTip(
+            "Abrir Linux Optimizer en otra sesión sin cerrar Cortex")
+        self._optimizer_btn.clicked.connect(self._open_optimizer)
+        header_layout.addWidget(self._optimizer_btn)
+
         self._status_pill = QLabel("SIN PERFIL")
         self._status_pill.setObjectName("statusPill")
         header_layout.addWidget(self._status_pill)
@@ -193,6 +215,14 @@ class CortexWindow(QMainWindow):
     def _switch_page(self, row: int) -> None:
         if 0 <= row < self.stack.count():
             self.stack.setCurrentIndex(row)
+
+    def _open_optimizer(self) -> None:
+        """Abre la sesión Linux Optimizer sin cerrar Cortex."""
+        ok, message = launch_optimizer()
+        if ok:
+            self.activity.log(message, "INFO")
+        else:
+            error_dialog(self, "Linux Optimizer", message)
 
     # ------------------------------------------------------------------
 

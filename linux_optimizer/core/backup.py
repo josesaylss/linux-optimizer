@@ -1,6 +1,7 @@
 """Copias de seguridad y restauración de configuraciones.
 
-Los respaldos viven en ~/.local/share/LinuxOptimizer/backups/<id>/ con:
+Los respaldos viven en ``~/.local/share/LinuxOptimizer/backups/<id>/`` en
+Linux y en ``%LOCALAPPDATA%\\LinuxOptimizer\\backups\\<id>\\`` en Windows, con:
   - metadata.json : tipo, etiqueta, fecha, datos JSON y lista de archivos
   - files/        : copia exacta de los archivos originales (permisos incluidos)
 
@@ -18,10 +19,15 @@ import time
 from pathlib import Path
 
 from linux_optimizer import APP_NAME
+from linux_optimizer.core import platform_info
 
 
 def default_backup_dir() -> Path:
-    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    if platform_info.IS_WINDOWS:
+        base = (os.environ.get("LOCALAPPDATA")
+                or os.path.expanduser("~/AppData/Local"))
+    else:
+        base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
     return Path(base) / APP_NAME.replace(" ", "") / "backups"
 
 

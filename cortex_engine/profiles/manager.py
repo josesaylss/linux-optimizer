@@ -52,6 +52,7 @@ PROFILES: tuple[Profile, ...] = (
     ),
 )
 PROFILE_MAP = {profile.key: profile for profile in PROFILES}
+PROFILE_KEYS = tuple(PROFILE_MAP)
 
 
 def apply_commands(

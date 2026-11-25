@@ -13,6 +13,7 @@ import shutil
 import subprocess
 
 from linux_optimizer import APP_NAME
+from linux_optimizer.core import platform_info
 
 log = logging.getLogger(APP_NAME.replace(" ", "."))
 def which(binary: str) -> str | None:
@@ -49,6 +50,11 @@ def run_privileged(cmd: list[str], timeout: float = 120.0) -> tuple[int, str, st
     Devuelve (rc, stdout, stderr); rc=126 suele indicar que el usuario
     canceló la autenticación.
     """
+    if platform_info.IS_WINDOWS:
+        return 127, "", (
+            "Esta acción usa pkexec y solo está disponible en Linux. "
+            "En Windows, Cortex aplica los perfiles con los mecanismos "
+            "nativos (powercfg).")
     pkexec = which("pkexec")
     if not pkexec:
         return 127, "", (

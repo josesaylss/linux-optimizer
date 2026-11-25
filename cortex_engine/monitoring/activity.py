@@ -1,8 +1,9 @@
 """Registro de actividad propio de Cortex Gaming Engine.
 
-Escribe en ``~/.local/state/LinuxOptimizer/cortex/activity.log`` y mantiene las
-últimas entradas en memoria para mostrarlas en la ventana. No comparte el log
-de Linux Optimizer.
+Escribe en ``~/.local/state/LinuxOptimizer/cortex/activity.log`` en Linux y en
+``%LOCALAPPDATA%\\LinuxOptimizer\\cortex\\activity.log`` en Windows. Mantiene
+las últimas entradas en memoria para mostrarlas en la ventana; no comparte el
+registro con Linux Optimizer.
 """
 
 from __future__ import annotations

@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from linux_optimizer import APP_NAME, __version__
+from linux_optimizer.core import platform_info
 from linux_optimizer.core.backup import BackupStore
 from linux_optimizer.ui.widgets import (
     Card,
@@ -85,15 +86,25 @@ class AboutPage(QWidget):
 
     def _build_info_text(self, distro_info) -> str:
         import PySide6
+        if platform_info.IS_WINDOWS:
+            safety = (
+                "Seguridad: confirmación antes de cada cambio, planes de "
+                "energía nativos,\nrespaldos automáticos y restauración exacta.")
+            target = "herramienta gráfica de optimización para Windows."
+        else:
+            safety = (
+                "Seguridad: confirmación antes de cada cambio, elevación solo "
+                "con pkexec,\nrespaldos automáticos previos y servicios "
+                "esenciales protegidos.")
+            target = "herramienta gráfica de optimización para Linux."
         return "\n".join([
-            f"{APP_NAME} {__version__} — herramienta gráfica de optimización para Linux.",
+            f"{APP_NAME} {__version__} — {target}",
             "",
-            f"Distribución: {distro_info.pretty}",
+            f"Sistema: {distro_info.pretty}",
             f"Kernel: {platform.release()} ({platform.machine()})",
             f"Python: {platform.python_version()}  ·  PySide6/Qt: {PySide6.__version__}",
             "",
-            "Seguridad: confirmación antes de cada cambio, elevación solo con pkexec,",
-            "respaldos automáticos previos y servicios esenciales protegidos.",
+            safety,
         ])
 
     def refresh_backups(self) -> None:

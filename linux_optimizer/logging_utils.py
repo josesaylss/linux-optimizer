@@ -7,11 +7,15 @@ import os
 from pathlib import Path
 
 from linux_optimizer import APP_NAME
+from linux_optimizer.core import platform_info
 
 
 def state_dir() -> Path:
-    """Carpeta de estado de la aplicación (~/.local/state/LinuxOptimizer)."""
-    base = os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state"
+    """Carpeta de estado de la aplicación (Linux y Windows)."""
+    if platform_info.IS_WINDOWS:
+        base = os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local"
+    else:
+        base = os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state"
     return Path(base) / APP_NAME.replace(" ", "")
 
 

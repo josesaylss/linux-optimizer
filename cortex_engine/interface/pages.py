@@ -1,16 +1,18 @@
 """Páginas de la interfaz de Cortex Gaming Engine.
 
-Cada pestaña es un módulo independiente (panel, perfiles, CPU, GPU, RAM,
-Game Booster, actividad y ajustes). Ninguna comparte widgets ni estado con
-Linux Optimizer: solo reutiliza utilidades genéricas de diálogos e hilos.
+Cada pestaña es un módulo propio (panel, perfiles, CPU, GPU, RAM,
+Game Booster, actividad y ajustes) de esta sesión de la misma aplicación.
+No comparte estado con Linux Optimizer: solo reutiliza utilidades genéricas
+de diálogos e hilos.
 """
 
 from __future__ import annotations
 
-import subprocess
+import platform
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QUrl, Qt, QTimer, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -35,6 +37,7 @@ from cortex_engine.interface.widgets import (
     SectionTitle,
 )
 from cortex_engine.profiles.manager import PROFILE_MAP, PROFILES, apply_commands
+from linux_optimizer.core import platform_info
 from linux_optimizer.ui.widgets import (
     confirm,
     error_dialog,
@@ -94,7 +97,8 @@ class PanelPage(Page):
         grid.setVerticalSpacing(6)
         keys = [
             ("profile", "Perfil activo"),
-            ("governor", "Governor de CPU"),
+            ("governor", "Plan de energía" if platform_info.IS_WINDOWS
+             else "Governor de CPU"),
             ("epp", "Preferencia de energía"),
             ("gpu", "GPU detectada"),
             ("swappiness", "Swappiness"),
@@ -251,12 +255,12 @@ class ProfileCard(QFrame):
 
 
 class ProfilesPage(Page):
-    """Perfiles ECO, BALANCED y EXTREME con un pkexec por operación."""
+    """Perfiles ECO, BALANCED y EXTREME aplicados en lote y reversibles."""
 
     def __init__(self, profiles, parent: QWidget | None = None):
         super().__init__(
             "Perfiles",
-            "ECO, BALANCED y EXTREME · un solo pkexec por cambio · "
+            "ECO, BALANCED y EXTREME · un solo paso por cambio · "
             "siempre reversible",
             parent,
         )
@@ -317,14 +321,18 @@ class ProfilesPage(Page):
                         "Este equipo no expone los controles que necesita "
                         f"el perfil {profile.title}.")
             return
+        detail = (
+            "Cortex guardará los valores originales antes de cambiar nada."
+            if platform_info.IS_WINDOWS else
+            "Cortex guardará los valores originales antes de cambiar nada y "
+            "pedirá tu contraseña una sola vez.")
         if not confirm(
             self,
             f"Aplicar perfil {profile.title}",
             f"¿Aplicar el perfil {profile.title}?\n\n" + "\n".join(
                 f"• {line}" for line in preview),
             danger=key == "extreme",
-            detail="Cortex guardará los valores originales antes de cambiar "
-                   "nada y pedirá tu contraseña una sola vez.",
+            detail=detail,
         ):
             return
         card = self._cards[key]
@@ -352,8 +360,11 @@ class ProfilesPage(Page):
         if not confirm(
             self,
             "Restaurar valores originales",
-            "Se devolverán CPU, GPU y memoria a los valores que había antes "
-            "de optimizar con Cortex.",
+            ("Se devolverá el plan de energía del sistema al valor que había "
+             "antes de optimizar con Cortex."
+             if platform_info.IS_WINDOWS else
+             "Se devolverán CPU, GPU y memoria a los valores que había antes "
+             "de optimizar con Cortex."),
             detail=self.profiles.snapshot_info(),
         ):
             return
@@ -388,18 +399,21 @@ class ProfilesPage(Page):
 
 class CpuPage(Page):
     def __init__(self, cpu, profiles, parent: QWidget | None = None):
-        super().__init__("CPU", "Governor, preferencia de energía y turbo",
-                         parent)
+        subtitle = ("Plan de energía de Windows"
+                    if platform_info.IS_WINDOWS
+                    else "Governor, preferencia de energía y turbo")
+        super().__init__("CPU", subtitle, parent)
         self.cpu = cpu
         self.profiles = profiles
+        self._windows = platform_info.IS_WINDOWS
 
         card = Card()
         card.body.addWidget(SectionTitle("Estado actual"))
         self._rows: dict[str, KeyValueRow] = {}
         for key, label in (
             ("model", "Procesador"),
-            ("cpus", "CPU con cpufreq"),
-            ("governor", "Governor"),
+            ("cpus", "CPU detectadas"),
+            ("governor", "Plan de energía" if self._windows else "Governor"),
             ("epp", "Preferencia de energía"),
             ("boost", "Turbo / boost"),
             ("available", "Disponibles"),
@@ -430,20 +444,28 @@ class CpuPage(Page):
     def refresh(self) -> None:
         state = self.cpu.state()
         self._rows["model"].set_value(_cpu_model())
+        self._rows["model"].value_label.setToolTip(_cpu_model())
         self._rows["cpus"].set_value(str(state.get("cpus", 0)))
         self._rows["governor"].set_value(state.get("governor") or "—")
-        self._rows["epp"].set_value(state.get("epp") or "no disponible")
-        self._rows["boost"].set_value(state.get("boost") or "—")
+        self._rows["epp"].set_value(
+            state.get("epp") or ("no aplica" if self._windows
+                                 else "no disponible"))
+        self._rows["boost"].set_value(
+            state.get("boost") or ("no aplica" if self._windows else "—"))
+        if self._windows:
+            self._rows["available"].set_value("planes de energía de Windows")
+            return
         available = state.get("available_governors") or []
         epp = state.get("available_epp") or []
         full = ", ".join(available) + (f" · EPP: {', '.join(epp)}" if epp else "")
         short = full if len(full) <= 64 else full[:61] + "…"
         self._rows["available"].set_value(short or "—")
         self._rows["available"].value_label.setToolTip(full or "Sin datos")
-        self._rows["model"].value_label.setToolTip(_cpu_model())
 
 
 def _cpu_model() -> str:
+    if platform_info.IS_WINDOWS:
+        return platform.processor() or platform.uname().processor or "CPU"
     try:
         with open("/proc/cpuinfo", encoding="utf-8") as fh:
             for line in fh:
@@ -502,9 +524,16 @@ class GpuPage(Page):
 
 class MemoryPage(Page):
     def __init__(self, memory, monitor, parent: QWidget | None = None):
-        super().__init__("RAM", "Swappiness, límites de mapas y cachés", parent)
+        subtitle = ("Memoria y swap (Windows no expone swappiness)"
+                    if platform_info.IS_WINDOWS
+                    else "Swappiness, límites de mapas y cachés")
+        super().__init__("RAM", subtitle, parent)
         self.memory = memory
         self.monitor = monitor
+        self._cache_supported = bool(memory.drop_caches_commands())
+        self._cache_label = ("Liberar cachés ahora (sync + drop_caches)"
+                             if self._cache_supported
+                             else "Liberar cachés no disponible en este sistema")
 
         tiles = QHBoxLayout()
         tiles.setSpacing(12)
@@ -526,8 +555,9 @@ class MemoryPage(Page):
             row = KeyValueRow(label)
             self._rows[key] = row
             card.body.addWidget(row)
-        cache_btn = QPushButton("Liberar cachés ahora (sync + drop_caches)")
+        cache_btn = QPushButton(self._cache_label)
         cache_btn.clicked.connect(self.drop_caches)
+        cache_btn.setEnabled(self._cache_supported)
         self._cache_btn = cache_btn
         card.body.addWidget(cache_btn)
         self.body.addWidget(card)
@@ -554,13 +584,20 @@ class MemoryPage(Page):
         swappiness = state.get("swappiness")
         self._swappiness.set_value(
             str(swappiness) if swappiness is not None else "—",
-            "valor actual del kernel")
+            "valor actual del kernel" if swappiness is not None
+            else "no disponible en Windows")
         max_map = state.get("max_map_count")
         self._rows["max_map"].set_value(
             str(max_map) if max_map is not None else "—")
-        self._rows["drop"].set_value("requiere tu contraseña")
+        self._rows["drop"].set_value(
+            "requiere tu contraseña" if self._cache_supported
+            else "no disponible en este sistema")
+        self._cache_btn.setText(self._cache_label)
+        self._cache_btn.setEnabled(self._cache_supported)
 
     def drop_caches(self) -> None:
+        if not self._cache_supported:
+            return
         if not confirm(
             self,
             "Liberar cachés",
@@ -580,7 +617,7 @@ class MemoryPage(Page):
 
     def _on_dropped(self, result) -> None:
         ok, failed = result
-        self._cache_btn.setText("Liberar cachés ahora (sync + drop_caches)")
+        self._cache_btn.setText(self._cache_label)
         if failed:
             error_dialog(self, "No se pudo liberar la caché", "\n".join(failed))
         else:
@@ -588,7 +625,7 @@ class MemoryPage(Page):
                         "La caché del kernel se vació correctamente.")
 
     def _on_error(self, message: str) -> None:
-        self._cache_btn.setText("Liberar cachés ahora (sync + drop_caches)")
+        self._cache_btn.setText(self._cache_label)
         error_dialog(self, "Error de Cortex", message)
 
 
@@ -628,11 +665,20 @@ class BoosterPage(Page):
 
         help_card = Card()
         help_card.body.addWidget(SectionTitle("Cómo funciona"))
-        help_card.body.addWidget(_muted(
-            "Cortex detecta el juego por el registro de MangoHud. Al "
-            "priorizarlo se le asigna más CPU (nice negativo) y prioridad de "
-            "E/S, con un único pkexec. «Quitar prioridad» restaura el valor "
-            "original. No se cierra ningún proceso."))
+        if platform_info.IS_WINDOWS:
+            help_text = (
+                "Cortex busca juegos en las carpetas habituales de Steam, "
+                "Epic, GOG, Riot, Ubisoft y EA, o entre las ventanas "
+                "visibles. Al priorizar se asigna prioridad Alta de Windows "
+                "y se restaura la original con «Quitar prioridad». No se "
+                "cierra ningún proceso y no hace falta elevar permisos.")
+        else:
+            help_text = (
+                "Cortex detecta el juego por el registro de MangoHud. Al "
+                "priorizarlo se le asigna más CPU (nice negativo) y prioridad "
+                "de E/S, con un único pkexec. «Quitar prioridad» restaura el "
+                "valor original. No se cierra ningún proceso.")
+        help_card.body.addWidget(_muted(help_text))
         self.body.addWidget(help_card)
         self.body.addStretch(1)
 
@@ -656,7 +702,7 @@ class BoosterPage(Page):
                 self._unboost_btn.setEnabled(True)
             else:
                 self._process.setText(
-                    "Actívala en Ajustes para detectar juegos con MangoHud.")
+                    "Actívala en Ajustes para detectar juegos automáticamente.")
                 self._unboost_btn.setEnabled(False)
             self._boost_btn.setEnabled(False)
             return
@@ -670,18 +716,22 @@ class BoosterPage(Page):
         if boosted:
             self._process.setText(
                 f"Priorizado: {boosted.get('name', 'juego')} "
-                f"(PID {boosted.get('pid')}, nice "
-                f"{boosted.get('boosted_at', '')})")
+                f"(PID {boosted.get('pid')}, {boosted.get('boosted_at', '')})")
             self._unboost_btn.setEnabled(True)
             self._boost_btn.setEnabled(False)
         elif process:
+            priority = ("prioridad de Windows" if platform_info.IS_WINDOWS
+                        else f"nice {process['nice']}")
             self._process.setText(
                 f"Proceso: {process['name']} · PID {process['pid']} · "
-                f"nice {process['nice']}")
+                f"{priority}")
             self._unboost_btn.setEnabled(False)
             self._boost_btn.setEnabled(True)
         else:
             self._process.setText(
+                "Abre el juego (Steam, Epic, GOG o una ventana de juego) y "
+                "espera unos segundos."
+                if platform_info.IS_WINDOWS else
                 "Abre un juego con MangoHud activo para detectarlo.")
             self._unboost_btn.setEnabled(False)
             self._boost_btn.setEnabled(bool(game))
@@ -696,8 +746,11 @@ class BoosterPage(Page):
             self,
             "Priorizar juego",
             f"¿Dar más prioridad a «{process['name']}» (PID {process['pid']})?",
-            detail="Se usará nice -5 y prioridad de E/S. Es reversible y no "
-                   "cierra ningún proceso.",
+            detail=("Se asignará prioridad Alta de Windows. Es reversible y "
+                    "no cierra ningún proceso."
+                    if platform_info.IS_WINDOWS else
+                    "Se usará nice -5 y prioridad de E/S. Es reversible y no "
+                    "cierra ningún proceso."),
         ):
             return
         run_worker(
@@ -777,12 +830,7 @@ class ActivityPage(Page):
     def open_folder(self) -> None:
         folder = self.activity.path.parent
         folder.mkdir(parents=True, exist_ok=True)
-        try:
-            subprocess.Popen(["xdg-open", str(folder)],
-                             stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL,
-                             start_new_session=True)
-        except OSError:
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder))):
             info_dialog(self, "Registro", str(self.activity.path))
 
 
@@ -937,8 +985,12 @@ class SettingsPage(Page):
 
     def restore_system(self) -> None:
         if not confirm(self, "Restaurar sistema",
-                       "Se devolverán CPU, GPU y memoria a sus valores "
-                       "originales.", detail=self.profiles.snapshot_info()):
+                       ("Se devolverá el plan de energía del sistema a su "
+                        "valor original."
+                        if platform_info.IS_WINDOWS else
+                        "Se devolverán CPU, GPU y memoria a sus valores "
+                        "originales."),
+                       detail=self.profiles.snapshot_info()):
             return
         run_worker(
             self._restore_btn,

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import os
+import platform
+import re
 from dataclasses import dataclass
 
 import psutil
 
-from linux_optimizer.core import hardware
+from linux_optimizer.core import hardware, platform_info
 from linux_optimizer.core.permissions import run
 
 
@@ -159,13 +161,36 @@ def check_kernel_logs() -> CheckResult:
 
 
 def check_system_summary() -> CheckResult:
+    if platform_info.IS_WINDOWS:
+        logical = psutil.cpu_count(logical=True) or 0
+        detail = (
+            f"Windows {platform.release()} · {platform.machine()} · "
+            f"{logical} CPUs lógicas")
+        return CheckResult("Sistema", "ok", detail)
     try:
-        import platform as _platform
-        uname = _platform.uname()
+        uname = platform.uname()
         detail = f"{uname.system} {uname.release} · {uname.machine} · {len(os.sched_getaffinity(0))} CPUs visibles"
         return CheckResult("Sistema", "ok", detail)
     except Exception as exc:  # pragma: no cover
         return CheckResult("Sistema", "info", f"No se pudo leer: {exc}")
+
+
+def check_power_plan() -> CheckResult:
+    """Plan de energía activo (solo Windows); Cortex lo usa para los perfiles."""
+    rc, out, err = run(["powercfg", "/getactivescheme"], timeout=15)
+    if rc != 0:
+        return CheckResult("Plan de energía", "info",
+                           err.strip() or "powercfg no disponible")
+    match = re.search(
+        r"\(([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+        r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\)", out)
+    if match:
+        name = out[:match.start()].rsplit(":", 1)[-1].strip()
+    else:
+        match = re.search(r"\(([^)]*)\)", out)
+        name = match.group(1).strip() if match else out.strip()
+    return CheckResult("Plan de energía", "ok",
+                       f"Plan activo: {name or 'desconocido'}")
 
 
 # ----------------------------------------------------------------------------
@@ -173,18 +198,27 @@ def check_system_summary() -> CheckResult:
 # ----------------------------------------------------------------------------
 
 def run_checks() -> list[CheckResult]:
-    checks = [
-        check_system_summary(),
-        check_boot_time(),
-        check_failed_units(),
-        check_disk_usage(),
-        check_memory(),
-        check_temperature(),
-        check_cpu_governor(),
-        check_swappiness(),
-        check_journal_errors(),
-        check_kernel_logs(),
-    ]
+    if platform_info.IS_WINDOWS:
+        checks = [
+            check_system_summary(),
+            check_power_plan(),
+            check_disk_usage(),
+            check_memory(),
+            check_temperature(),
+        ]
+    else:
+        checks = [
+            check_system_summary(),
+            check_boot_time(),
+            check_failed_units(),
+            check_disk_usage(),
+            check_memory(),
+            check_temperature(),
+            check_cpu_governor(),
+            check_swappiness(),
+            check_journal_errors(),
+            check_kernel_logs(),
+        ]
     checks.sort(key=lambda c: SEVERITY_ORDER.get(c.severity, 3))
     return checks
 

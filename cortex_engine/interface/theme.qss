@@ -1,4 +1,4 @@
-/* Cortex Gaming Engine — tema oscuro con acentos verdes (independiente) */
+/* Cortex Gaming Engine — tema oscuro con acentos verdes de la sesión Cortex */
 
 * {
     font-family: "Inter", "Noto Sans", "Cantarell", "Segoe UI", sans-serif;
@@ -64,6 +64,21 @@ QLabel#statusPill {
     padding: 3px 10px;
     font-size: 11px;
     font-weight: 600;
+}
+
+QPushButton#sessionSwitch {
+    background-color: transparent;
+    border: 1px solid #1f4a33;
+    border-radius: 8px;
+    color: #9fc9b2;
+    padding: 6px 12px;
+    font-size: 11px;
+}
+
+QPushButton#sessionSwitch:hover {
+    background-color: #10231a;
+    border-color: #2b6b48;
+    color: #d7f3e3;
 }
 
 /* ---------------- Barra lateral ---------------- */

@@ -1,8 +1,9 @@
-"""Cortex Gaming Engine: motor independiente de optimización para juegos.
+"""Cortex Gaming Engine: sesión gaming de Linux Optimizer.
 
-Este paquete es una aplicación completa y separada de Linux Optimizer: tiene su
-propia ventana, tema, configuración, monitorización, registro y perfiles. La
-aplicación principal solo ofrece un acceso para abrirlo.
+Es **la misma aplicación** ejecutada con ``--cortex``: tiene su propia ventana,
+tema, configuración, monitorización, registro y perfiles para que puedas usar
+ambas sesiones a la vez, pero comparte el ejecutable y los detectores de
+hardware con la sesión Linux Optimizer.
 """
 
 from __future__ import annotations

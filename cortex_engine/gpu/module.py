@@ -5,6 +5,7 @@ from __future__ import annotations
 import shlex
 from pathlib import Path
 
+from linux_optimizer.core import platform_info
 from linux_optimizer.core.hardware import GPUInfo, detect_gpus
 
 TuneCommand = tuple[str, str, str]
@@ -71,10 +72,15 @@ class GpuModule:
 
     def notes(self) -> list[str]:
         notes = []
+        if platform_info.IS_WINDOWS:
+            notes.append(
+                "Windows: Cortex no cambia relojes ni energía de GPU; usa el "
+                "panel de NVIDIA, AMD o Intel. El perfil de energía del "
+                "sistema sí se aplica con powercfg.")
         if "nvidia" in self.vendors():
             notes.append(
                 "NVIDIA: los relojes y el consumo se controlan con su driver "
-                "(nvidia-settings); Cortex no fuerza valores.")
+                "(nvidia-settings o el panel de NVIDIA); Cortex no fuerza valores.")
         intel = self.intel_pairs()
         if intel and not any(
                 p.with_name("gt_RP1_freq_mhz").exists() for p, _ in intel):

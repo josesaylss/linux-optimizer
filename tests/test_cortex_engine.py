@@ -349,13 +349,13 @@ def test_booster_lifecycle(tmp_path):
     assert game["name"] == "juego"
 
 
-def test_cortex_launcher_points_to_independent_process(monkeypatch):
+def test_cortex_launcher_opens_another_session(monkeypatch):
     from linux_optimizer.core import cortex_launcher
 
-    assert cortex_launcher.cortex_root() is not None
+    assert cortex_launcher.app_root() is not None
     command = cortex_launcher.cortex_command()
     assert command is not None
-    assert command[1:] == ["-m", "cortex_engine"]
+    assert command[1:] == ["-m", "linux_optimizer", "--cortex"]
 
     started = {}
 
@@ -369,6 +369,26 @@ def test_cortex_launcher_points_to_independent_process(monkeypatch):
     assert ok
     assert "abriendo" in message
     assert started["kwargs"]["start_new_session"] is True
+
+    ok, message = cortex_launcher.launch_optimizer()
+    assert ok
+    assert started["cmd"][1:] == ["-m", "linux_optimizer"]
+
+
+def test_app_entry_delegates_cortex_session(monkeypatch):
+    called = {}
+
+    def fake_cortex_main(argv):
+        called["argv"] = argv
+        return 0
+
+    import cortex_engine.main as cortex_main_module
+
+    monkeypatch.setattr(cortex_main_module, "main", fake_cortex_main)
+    from linux_optimizer.app import main
+
+    assert main(["--cortex"]) == 0
+    assert called["argv"] == []
 
 
 # ----------------------------------------------------------------------------
@@ -403,6 +423,7 @@ def test_cortex_window_has_independent_pages(app, tmp_path, monkeypatch):
         assert window._status_pill.text() == "SIN PERFIL"
         assert window.stack.currentIndex() == 0
         assert "Cortex" in window.windowTitle()
+        assert window._optimizer_btn.text() == "Linux Optimizer"
         assert "cortexSidebar" in CORTEX_QSS
         assert "cortexLaunch" in open(
             Path(__file__).resolve().parents[1] /
@@ -423,3 +444,22 @@ def test_main_window_has_single_cortex_access(app, tmp_path, monkeypatch):
     finally:
         window.monitor.stop()
         window.close()
+
+
+def test_linux_desktop_integration_offers_cortex_session():
+    root = Path(__file__).resolve().parents[1]
+    desktop = (root / "packaging" / "linux-optimizer.desktop").read_text(
+        encoding="utf-8")
+    assert "Actions=Cortex;" in desktop
+    assert "[Desktop Action Cortex]" in desktop
+    action = desktop.split("[Desktop Action Cortex]", 1)[1]
+    assert "Exec=@APPDIR@/run.sh --cortex" in action
+    assert "Comment=" not in action  # clave no permitida en Desktop Action
+
+    spec = (root / "packaging" / "linux-optimizer.spec").read_text(
+        encoding="utf-8")
+    assert "s|@APPDIR@/run.sh|%{_bindir}/linux-optimizer|g" in spec
+    assert "Exec=.*run.sh" not in spec
+
+    launcher = (root / "run.sh").read_text(encoding="utf-8")
+    assert 'python3 -m linux_optimizer "$@"' in launcher

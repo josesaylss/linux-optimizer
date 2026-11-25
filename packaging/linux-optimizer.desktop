@@ -9,3 +9,8 @@ Terminal=false
 Categories=System;
 Keywords=optimizer;optimizador;rendimiento;limpieza;gaming;servicios;energia;
 StartupWMClass=LinuxOptimizer
+Actions=Cortex;
+
+[Desktop Action Cortex]
+Name=Cortex Gaming Engine
+Exec=@APPDIR@/run.sh --cortex

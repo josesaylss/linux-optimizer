@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from linux_optimizer.core import cleaner
+from linux_optimizer.core import platform_info
 from linux_optimizer.core.cleaner import build_targets
 from linux_optimizer.ui.widgets import (
     Card,
@@ -41,8 +42,11 @@ class CleanerPage(QWidget):
         title.setObjectName("headerTitle")
         layout.addWidget(title)
         subtitle = QLabel(
-            "Cada objetivo solo borra datos regenerables. Las acciones de sistema "
-            "requieren tu confirmación y privilegios (pkexec)."
+            ("Cada objetivo solo borra datos regenerables de Windows. Las "
+             "acciones de sistema piden tu confirmación."
+             if platform_info.IS_WINDOWS else
+             "Cada objetivo solo borra datos regenerables. Las acciones de "
+             "sistema requieren tu confirmación y privilegios (pkexec).")
         )
         subtitle.setObjectName("headerSubtitle")
         subtitle.setWordWrap(True)

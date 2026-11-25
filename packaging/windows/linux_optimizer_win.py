@@ -1,0 +1,20 @@
+"""Punto de entrada del ejecutable de Windows.
+
+Es el mismo ejecutable para las dos sesiones de la aplicación:
+
+    LinuxOptimizer.exe             → Linux Optimizer
+    LinuxOptimizer.exe --cortex    → Cortex Gaming Engine
+
+PyInstaller usa este archivo como script principal del .exe.
+"""
+
+from __future__ import annotations
+
+import multiprocessing
+import sys
+
+from linux_optimizer.app import main
+
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    raise SystemExit(main(sys.argv))

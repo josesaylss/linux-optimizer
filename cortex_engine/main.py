@@ -1,11 +1,12 @@
-"""Punto de entrada de Cortex Gaming Engine.
+"""Sesión Cortex Gaming Engine de la aplicación Linux Optimizer.
 
-Se ejecuta como aplicación independiente:
+Se abre con el mismo ejecutable:
 
-    python3 -m cortex_engine
+    linux-optimizer --cortex
+    python3 -m cortex_engine        (equivalente en desarrollo)
 
-Linux Optimizer solo abre este proceso; cerrar Cortex no afecta a la
-aplicación principal y viceversa.
+Cortex conserva su propia ventana, tema, configuración, monitor y registro;
+cerrar Cortex no afecta a la sesión Linux Optimizer y viceversa.
 """
 
 from __future__ import annotations
@@ -17,10 +18,20 @@ from PySide6.QtWidgets import QApplication
 from cortex_engine import APP_NAME, APP_VERSION
 from cortex_engine.interface.theme import CORTEX_QSS
 from cortex_engine.interface.window import CortexWindow
+from linux_optimizer.logging_utils import setup_logging
+
+
+def _setup_logging() -> None:
+    try:
+        setup_logging(
+            f"=== Inicio de la sesión {APP_NAME} {APP_VERSION} ===")
+    except OSError:
+        pass
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
+    _setup_logging()
     app = QApplication.instance()
     embedded = app is not None
     if app is None:

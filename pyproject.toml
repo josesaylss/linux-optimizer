@@ -18,3 +18,10 @@ cortex-gaming-engine = "cortex_engine.main:main"
 
 [tool.setuptools.packages.find]
 include = ["linux_optimizer*", "cortex_engine*"]
+
+[tool.setuptools.package-data]
+"cortex_engine.interface" = ["theme.qss"]
+"linux_optimizer.resources" = ["*.svg", "*.ico"]
+
+[project.optional-dependencies]
+build-windows = ["pyinstaller>=6.10"]

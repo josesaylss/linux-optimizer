@@ -1,7 +1,8 @@
 """Configuración propia de Cortex Gaming Engine.
 
 Se guarda en ``~/.config/linux-optimizer/cortex.json`` (o ``$XDG_CONFIG_HOME``)
-y es totalmente independiente de la configuración de Linux Optimizer. Incluye
+en Linux y en ``%APPDATA%\\linux-optimizer\\cortex.json`` en Windows. Es
+totalmente independiente de la configuración de Linux Optimizer e incluye
 exportación e importación para guardar/restaurar la configuración del usuario.
 """
 
@@ -13,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from cortex_engine import APP_NAME, APP_VERSION
+from linux_optimizer.core import platform_info
 
 PROFILE_KEYS = ("eco", "balanced", "extreme")
 
@@ -26,7 +28,10 @@ DEFAULT_CONFIG = {
 
 
 def config_dir() -> Path:
-    base = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
+    if platform_info.IS_WINDOWS:
+        base = os.environ.get("APPDATA") or Path.home() / "AppData/Roaming"
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
     return Path(base) / "linux-optimizer"
 
 
@@ -35,7 +40,10 @@ def config_path() -> Path:
 
 
 def state_dir() -> Path:
-    base = os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state"
+    if platform_info.IS_WINDOWS:
+        base = os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local"
+    else:
+        base = os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state"
     return Path(base) / "LinuxOptimizer" / "cortex"
 
 
