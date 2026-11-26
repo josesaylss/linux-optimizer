@@ -15,6 +15,7 @@ from PySide6.QtCore import QUrl, Qt, QTimer, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -651,6 +652,23 @@ class BoosterPage(Page):
         self._process = _muted("")
         card.body.addWidget(self._process)
 
+        card.body.addWidget(SectionTitle("Selección manual"))
+        manual_row = QHBoxLayout()
+        self._process_combo = QComboBox()
+        self._process_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToContents)
+        manual_row.addWidget(self._process_combo, 1)
+        self._refresh_pro_btn = QPushButton("Actualizar")
+        self._refresh_pro_btn.clicked.connect(self.refresh_processes)
+        manual_row.addWidget(self._refresh_pro_btn)
+        self._manual_btn = QPushButton("Priorizar seleccionado")
+        self._manual_btn.setObjectName("accentButton")
+        self._manual_btn.clicked.connect(self.boost_selected)
+        manual_row.addWidget(self._manual_btn)
+        card.body.addLayout(manual_row)
+        card.body.addWidget(_muted(
+            "Plan B: si no detecta el juego, elige su proceso aquí."))
+
         buttons = QHBoxLayout()
         self._boost_btn = QPushButton("Priorizar juego")
         self._boost_btn.setObjectName("accentButton")
@@ -669,15 +687,17 @@ class BoosterPage(Page):
             help_text = (
                 "Cortex busca juegos en las carpetas habituales de Steam, "
                 "Epic, GOG, Riot, Ubisoft y EA, o entre las ventanas "
-                "visibles. Al priorizar se asigna prioridad Alta de Windows "
-                "y se restaura la original con «Quitar prioridad». No se "
-                "cierra ningún proceso y no hace falta elevar permisos.")
+                "visibles. Si no lo detecta, usa «Selección manual». Al "
+                "priorizar se asigna prioridad Alta de Windows y se restaura "
+                "la original con «Quitar prioridad». No se cierra ningún "
+                "proceso y no hace falta elevar permisos.")
         else:
             help_text = (
                 "Cortex detecta el juego por el registro de MangoHud. Al "
                 "priorizarlo se le asigna más CPU (nice negativo) y prioridad "
-                "de E/S, con un único pkexec. «Quitar prioridad» restaura el "
-                "valor original. No se cierra ningún proceso.")
+                "de E/S, con un único pkexec. Si no lo detecta, usa "
+                "«Selección manual». «Quitar prioridad» restaura el valor "
+                "original. No se cierra ningún proceso.")
         help_card.body.addWidget(_muted(help_text))
         self.body.addWidget(help_card)
         self.body.addStretch(1)
@@ -687,7 +707,45 @@ class BoosterPage(Page):
         self._timer.timeout.connect(self.refresh)
         self._timer.start()
         activity.changed.connect(self.refresh)
+        self.refresh_processes()
         self.refresh()
+
+    def refresh_processes(self) -> None:
+        """Actualiza la lista desplegable de procesos para selección manual."""
+        selected = self._process_combo.currentData()
+        self._process_combo.clear()
+        for process in self.booster.list_processes():
+            self._process_combo.addItem(process["label"], process["pid"])
+        if selected is not None:
+            index = self._process_combo.findData(selected)
+            if index >= 0:
+                self._process_combo.setCurrentIndex(index)
+        self._manual_btn.setEnabled(self._process_combo.count() > 0)
+
+    def boost_selected(self) -> None:
+        pid = self._process_combo.currentData()
+        name = self._process_combo.currentText()
+        if pid is None:
+            error_dialog(self, "Game Booster", "No hay ningún proceso seleccionado.")
+            return
+        if not confirm(
+            self,
+            "Priorizar proceso",
+            f"¿Dar más prioridad a «{name}»?",
+            detail=("Se asignará prioridad Alta de Windows "
+                    if platform_info.IS_WINDOWS else
+                    "Se usará nice -5 y prioridad de E/S")
+                   + ". Es reversible y no cierra ningún proceso.",
+        ):
+            return
+        run_worker(
+            self._manual_btn,
+            lambda: self.booster.boost(pid),
+            self._on_result,
+            self._on_error,
+            busy_text="Priorizando…",
+            parent=self,
+        )
 
     def refresh(self) -> None:
         self._boost_btn.setText("Priorizar juego")
@@ -764,7 +822,7 @@ class BoosterPage(Page):
 
     def unboost(self) -> None:
         if not confirm(self, "Quitar prioridad",
-                       "Se restaurará el nice original del juego."):
+                       "Se restaurará la prioridad original del juego."):
             return
         run_worker(
             self._unboost_btn,

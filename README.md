@@ -18,7 +18,7 @@ propia ventana, tema, configuración, monitorización y registro. El botón
 
 | Módulo | Descripción |
 |---|---|
-| ◈ **Cortex Gaming Engine** | Sesión gaming: Panel, Perfiles ECO/BALANCED/EXTREME, CPU, GPU, RAM, Game Booster, Actividad y Ajustes, con tema verde propio y guardado/restauración independientes. |
+| ◈ **Cortex Gaming Engine** | Sesión gaming: Panel, Perfiles ECO/BALANCED/EXTREME, CPU, GPU, RAM, Game Booster (detección automática o selección manual del proceso), Actividad y Ajustes, con tema verde propio y guardado/restauración independientes. |
 | 🖥 **Panel de rendimiento** | CPU (total y por núcleo), RAM, swap, GPU, temperaturas, disco (uso e I/O) y red, en tiempo real con gráficos. |
 | 🧹 **Limpieza segura** | Caché de usuario, miniaturas, papelera, caché del gestor de paquetes (dnf/apt/pacman), journal y runtimes flatpak sin uso. |
 | 🎮 **Modo Gaming** | Optimizaciones temporales y reversibles: governor de CPU, detener Bluetooth/CUPS/Avahi, vaciar caché. Detecta GameMode (Feral). |

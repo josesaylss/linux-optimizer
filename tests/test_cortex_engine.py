@@ -349,6 +349,49 @@ def test_booster_lifecycle(tmp_path):
     assert game["name"] == "juego"
 
 
+def test_booster_manual_process_selection(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from cortex_engine.gaming import booster as booster_module
+    from linux_optimizer.core import platform_info
+
+    infos = [
+        {"pid": 11, "name": "game.exe",
+         "exe": r"D:\SteamLibrary\steamapps\common\Juego\game.exe",
+         "nice": 8, "memory_info": SimpleNamespace(rss=1000)},
+        {"pid": 22, "name": "tool.exe", "exe": r"C:\Tools\tool.exe",
+         "nice": 8, "memory_info": SimpleNamespace(rss=100)},
+    ]
+    monkeypatch.setattr(platform_info, "IS_WINDOWS", True)
+    monkeypatch.setattr(
+        booster_module.psutil, "process_iter",
+        lambda attrs: iter(SimpleNamespace(info=info) for info in infos))
+
+    class FakeProcess:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def nice(self, value=None):
+            return 8 if value is None else value
+
+        def as_dict(self, attrs):
+            return {"pid": self.pid, "name": "tool.exe", "nice": 8,
+                    "memory_info": SimpleNamespace(rss=100)}
+
+    monkeypatch.setattr(booster_module.psutil, "Process", FakeProcess)
+    monkeypatch.setattr(booster_module.psutil, "pid_exists", lambda pid: True)
+    booster = booster_module.GameBooster(state_path=tmp_path / "booster.json")
+
+    listed = booster.list_processes()
+    assert [item["pid"] for item in listed] == [11, 22]
+    assert listed[0]["game_dir"] is True
+    assert "PID 11" in listed[0]["label"]
+
+    ok, message = booster.boost(22)
+    assert ok and "prioridad alta" in message
+    assert booster.boosted()["pid"] == 22
+
+
 def test_cortex_launcher_opens_another_session(monkeypatch):
     from linux_optimizer.core import cortex_launcher
 
@@ -424,6 +467,10 @@ def test_cortex_window_has_independent_pages(app, tmp_path, monkeypatch):
         assert window.stack.currentIndex() == 0
         assert "Cortex" in window.windowTitle()
         assert window._optimizer_btn.text() == "Linux Optimizer"
+        booster_page = next(page for page in window.pages
+                            if type(page).__name__ == "BoosterPage")
+        assert booster_page._process_combo is not None
+        assert booster_page._manual_btn is not None
         assert "cortexSidebar" in CORTEX_QSS
         assert "cortexLaunch" in open(
             Path(__file__).resolve().parents[1] /

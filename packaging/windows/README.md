@@ -69,7 +69,8 @@ descomprime en una carpeta temporal.
     Windows (`powercfg`), con instantánea del plan original y restauración.
   - Game Booster: detecta juegos en carpetas de Steam, Epic, GOG, Riot,
     Ubisoft y EA (o ventanas visibles) y asigna prioridad Alta del proceso
-    con `psutil`, sin cerrar procesos ni pedir contraseña.
+    con `psutil`, sin cerrar procesos ni pedir contraseña. Si no detecta el
+    juego, usa «Selección manual» para elegir cualquier proceso en ejecución.
   - Configuración, registro e instantánea en `%APPDATA%` y `%LOCALAPPDATA%`.
 
 ## Limitaciones deliberadas en Windows

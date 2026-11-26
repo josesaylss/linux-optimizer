@@ -206,6 +206,45 @@ class GameBooster:
         matches = self.candidates(game["name"])
         return matches[0] if matches else None
 
+    def list_processes(self, limit: int = 80) -> list[dict]:
+        """Procesos candidatos para selección manual (plan B).
+
+        Se ordena por probabilidad de ser un juego: carpeta de juegos o
+        ventana visible primero, después consumo de memoria. Nunca incluye
+        la propia aplicación.
+        """
+        visible = _windows_visible_pids() if platform_info.IS_WINDOWS else set()
+        me = os.getpid()
+        found: list[dict] = []
+        for proc in psutil.process_iter(
+                ["pid", "name", "exe", "nice", "memory_info"]):
+            try:
+                info = proc.info
+                pid = int(info.get("pid") or 0)
+                name = info.get("name") or ""
+                if not pid or pid == me or name.lower() in _WINDOWS_IGNORED:
+                    continue
+                exe = info.get("exe") or ""
+                lowered = exe.lower().replace("/", "\\")
+                game_dir = any(hint in lowered
+                               for hint in _WINDOWS_GAME_HINTS)
+                memory = info.get("memory_info")
+                rss = memory.rss if memory else 0
+                found.append({
+                    "pid": pid,
+                    "name": name,
+                    "nice": info.get("nice") or 0,
+                    "rss": rss,
+                    "visible": pid in visible,
+                    "game_dir": game_dir,
+                    "label": (f"{name} · PID {pid} · {rss / 1e6:.0f} MB"),
+                })
+            except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
+                continue
+        found.sort(key=lambda item: (item["game_dir"], item["visible"],
+                                     item["rss"]), reverse=True)
+        return found[:limit]
+
     # ------------------------------------------------------------------
     # Priorización
     # ------------------------------------------------------------------
@@ -225,13 +264,36 @@ class GameBooster:
             return None
         return data
 
-    def boost(self) -> tuple[bool, str]:
-        process = self.find_process()
+    def _process_by_pid(self, pid: int) -> dict | None:
+        if pid <= 0 or pid == os.getpid():
+            return None
+        try:
+            info = psutil.Process(pid).as_dict(
+                ["pid", "name", "nice", "memory_info"])
+        except (psutil.Error, OSError, ValueError):
+            return None
+        memory = info.get("memory_info")
+        return {
+            "pid": pid,
+            "name": info.get("name") or f"PID {pid}",
+            "nice": info.get("nice") or 0,
+            "rss": memory.rss if memory else 0,
+        }
+
+    def boost(self, pid: int | None = None) -> tuple[bool, str]:
+        if pid is None:
+            process = self.find_process()
+        else:
+            process = self._process_by_pid(int(pid))
+            if process is None:
+                return False, (f"El proceso {pid} ya no está en ejecución. "
+                               "Actualiza la lista e inténtalo de nuevo.")
         if process is None:
             hint = ("Abre el juego (Steam, Epic, GOG o una ventana de juego) "
-                    "e inténtalo de nuevo."
+                    "e inténtalo de nuevo, o elige el proceso manualmente."
                     if platform_info.IS_WINDOWS else
-                    "Abre el juego con MangoHud activo e inténtalo de nuevo.")
+                    "Abre el juego con MangoHud activo o elige el proceso "
+                    "manualmente.")
             return False, "No se pudo identificar el proceso del juego. " + hint
         if self.boosted():
             return False, "Ya hay un juego priorizado."
