@@ -2,23 +2,24 @@
 
 Herramienta gráfica profesional para optimizar y administrar el rendimiento
 del equipo, desarrollada en **Python + PySide6 + psutil + Qt Stylesheets
-(QSS)**. Es **una sola aplicación con dos sesiones**:
+(QSS)**. Es **una sola aplicación con una sola ventana y dos modos**:
 
-| Sesión | Acceso |
+| Modo | Acceso |
 |---|---|
 | Linux Optimizer | `linux-optimizer` (o `LinuxOptimizer.exe` en Windows) |
 | Cortex Gaming Engine | `linux-optimizer --cortex` (o `LinuxOptimizer.exe --cortex`) |
 
-Ambas comparten el ejecutable y los detectores de hardware, pero tienen su
-propia ventana, tema, configuración, monitorización y registro. El botón
-**◈ Cortex Gaming Engine** abre Cortex sin cerrar Linux Optimizer; el botón
-**Linux Optimizer** de Cortex hace el camino inverso.
+Ambos comparten el ejecutable, la ventana y los detectores de hardware, pero
+Cortex tiene su tema verde, configuración, monitorización y registro propios.
+El botón **◈ Cortex Gaming Engine** cambia al modo Cortex en la misma ventana;
+el botón **Linux Optimizer** de Cortex vuelve al modo principal. No se abre
+ningún proceso ni ventana adicional.
 
 ## Características
 
 | Módulo | Descripción |
 |---|---|
-| ◈ **Cortex Gaming Engine** | Sesión gaming: Panel, Perfiles ECO/BALANCED/EXTREME, CPU, GPU, RAM, Game Booster (detección automática o selección manual del proceso), Actividad y Ajustes, con tema verde propio y guardado/restauración independientes. |
+| ◈ **Cortex Gaming Engine** | Modo gaming de la misma ventana: Panel, Perfiles ECO/BALANCED/EXTREME, CPU, GPU, RAM, Game Booster (detección automática o selección manual del proceso), Actividad y Ajustes, con tema verde propio y guardado/restauración independientes. |
 | 🖥 **Panel de rendimiento** | CPU (total y por núcleo), RAM, swap, GPU, temperaturas, disco (uso e I/O) y red, en tiempo real con gráficos. |
 | 🧹 **Limpieza segura** | Caché de usuario, miniaturas, papelera, caché del gestor de paquetes (dnf/apt/pacman), journal y runtimes flatpak sin uso. |
 | 🎮 **Modo Gaming** | Optimizaciones temporales y reversibles: governor de CPU, detener Bluetooth/CUPS/Avahi, vaciar caché. Detecta GameMode (Feral). |
@@ -37,7 +38,7 @@ y AMD (sysfs: `gpu_busy_percent`, VRAM, hwmon).
 - **Arquitectura preparada para:** Ubuntu, Debian y Arch (detección por
   familia en `linux_optimizer/core/distro.py`, que selecciona el gestor de
   paquetes, las reglas de limpieza y el backend de energía).
-- **Windows 10/11 x64:** mismo `.exe` para las dos sesiones. Las páginas que
+- **Windows 10/11 x64:** mismo `.exe` para los dos modos. Las páginas que
   dependen de systemd/pkexec se ocultan; Cortex usa `powercfg` y prioridad
   nativa de procesos. Ver `packaging/windows/README.md`.
 
@@ -97,7 +98,7 @@ packaging\windows\build-exe.ps1
 ```
 
 o doble clic en `packaging\windows\build-exe.bat`. Se genera
-`dist\LinuxOptimizer.exe`, que abre Linux Optimizer o la sesión Cortex con
+`dist\LinuxOptimizer.exe`, que abre Linux Optimizer o el modo Cortex con
 `--cortex`. Instrucciones completas y limitaciones en
 `packaging/windows/README.md`.
 
@@ -122,7 +123,7 @@ linux_optimizer/
 │   ├── backup.py           #   Snapshots y restauración
 │   └── permissions.py      #   run() / run_privileged() (pkexec)
 └── ui/                     # Páginas y widgets (dashboard, cleaner, gaming…)
-cortex_engine/              # Sesión Cortex (tema, módulos, perfiles, registro)
+cortex_engine/              # Modo Cortex (tema, módulos, perfiles, registro)
 ├── interface/              #   Ventana, páginas, tema QSS y widgets propios
 ├── cpu/ gpu/ memory/       #   Controles por hardware (+ adaptadores Windows)
 ├── profiles/               #   ECO/BALANCED/EXTREME, lote y restauración
@@ -141,7 +142,7 @@ run.sh                      # Lanzador
 ```
 
 Las pruebas cubren detección de distro, respaldos (crear/restaurar), reglas de
-limpieza, protección de servicios esenciales, las dos sesiones de la aplicación,
+limpieza, protección de servicios esenciales, el cambio entre modos en la misma ventana,
 los flujos de Windows (simulados en Linux con dobles de `powercfg`/`psutil`),
 el empaquetado `.exe` y un smoke test de la GUI en modo offscreen.
 

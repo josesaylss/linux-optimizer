@@ -1,8 +1,9 @@
-"""Ventana de la sesión Cortex Gaming Engine.
+"""Vista de Cortex Gaming Engine dentro de la ventana de la aplicación.
 
-Cortex es una sesión de la misma aplicación que Linux Optimizer: conserva su
-propia barra lateral, tema, configuración, monitor y registro, y se abre con
-``linux-optimizer --cortex`` en su propia ventana.
+Cortex es un **modo de la misma ventana**: conserva su barra lateral, tema,
+configuración, monitor y registro, pero se alterna con Linux Optimizer sin
+abrir otra ventana ni otro proceso. ``--cortex`` inicia la app directamente
+en este modo.
 """
 
 from __future__ import annotations
@@ -15,7 +16,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QMainWindow,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -46,23 +46,32 @@ from cortex_engine.profiles.manager import ProfileManager, PROFILE_MAP
 from cortex_engine.profiles.windows import WindowsProfileManager
 from cortex_engine.restore.store import RestoreStore
 from linux_optimizer.core import platform_info
-from linux_optimizer.core.cortex_launcher import launch_optimizer
 from linux_optimizer.resources import ICON_PATH
 from linux_optimizer.ui.widgets import error_dialog, wait_for_workers
 
 
-class CortexWindow(QMainWindow):
-    """Contenedor de los ocho módulos de Cortex Gaming Engine."""
+class CortexWindow(QWidget):
+    """Vista con los ocho módulos de Cortex Gaming Engine.
+
+    Es un QWidget para poder vivir dentro de la ventana principal. Si se
+    muestra como ventana independiente, Qt la trata como tal sin cambios.
+    """
 
     def __init__(self, config: CortexConfig | None = None,
-                 parent: QWidget | None = None):
+                 parent: QWidget | None = None,
+                 on_optimizer=None,
+                 standalone: bool | None = None):
         super().__init__(parent)
+        self._on_optimizer = on_optimizer
+        self._standalone = (parent is None if standalone is None
+                            else standalone)
+        self.setObjectName("cortexModeRoot")
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.resize(1120, 720)
         self.setMinimumSize(QSize(940, 600))
         self.setWindowIcon(QIcon(str(ICON_PATH)))
 
-        # ---------------- Motor de la sesión Cortex ----------------
+        # ---------------- Motor del modo Cortex ----------------
         self.config = config if config is not None else CortexConfig()
         self.activity = ActivityLog()
         self.store = RestoreStore()
@@ -91,13 +100,16 @@ class CortexWindow(QMainWindow):
 
         layout.addWidget(self._build_sidebar())
         layout.addWidget(self._build_right(), 1)
-        self.setCentralWidget(root)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(root)
 
         self._build_pages()
         self.profiles.changed.connect(self._refresh_all)
         self._restore_geometry()
         self._refresh_all()
-        self.monitor.start()
+        self.set_active(True)
         self.activity.log(f"{APP_NAME} iniciado.", "INFO")
 
     # ------------------------------------------------------------------
@@ -153,11 +165,10 @@ class CortexWindow(QMainWindow):
         header_layout.addLayout(titles)
         header_layout.addStretch(1)
 
-        # Misma aplicación, otra sesión: volver a Linux Optimizer.
+        # Misma ventana: volver al modo Linux Optimizer.
         self._optimizer_btn = QPushButton("Linux Optimizer")
         self._optimizer_btn.setObjectName("sessionSwitch")
-        self._optimizer_btn.setToolTip(
-            "Abrir Linux Optimizer en otra sesión sin cerrar Cortex")
+        self._optimizer_btn.setToolTip("Volver al modo Linux Optimizer")
         self._optimizer_btn.clicked.connect(self._open_optimizer)
         header_layout.addWidget(self._optimizer_btn)
 
@@ -217,12 +228,24 @@ class CortexWindow(QMainWindow):
             self.stack.setCurrentIndex(row)
 
     def _open_optimizer(self) -> None:
-        """Abre la sesión Linux Optimizer sin cerrar Cortex."""
+        """Vuelve al modo Linux Optimizer de la misma ventana."""
+        if self._on_optimizer is not None:
+            self._on_optimizer()
+            return
+        # Uso independiente (sin ventana principal): se inicia la aplicación.
+        from linux_optimizer.core.cortex_launcher import launch_optimizer
         ok, message = launch_optimizer()
         if ok:
             self.activity.log(message, "INFO")
         else:
             error_dialog(self, "Linux Optimizer", message)
+
+    def set_active(self, active: bool) -> None:
+        """Activa/desactiva la monitorización según el modo visible."""
+        if active:
+            self.monitor.start()
+        else:
+            self.monitor.stop()
 
     # ------------------------------------------------------------------
 
@@ -245,6 +268,8 @@ class CortexWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _restore_geometry(self) -> None:
+        if not self._standalone:
+            return  # integrada en la ventana principal: comparte su geometría
         stored = self.config.get("window_geometry", "")
         if not stored:
             return

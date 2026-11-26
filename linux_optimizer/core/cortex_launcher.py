@@ -1,14 +1,11 @@
-"""Sesiones de la aplicación única: Linux Optimizer y Cortex Gaming Engine.
+"""Utilidades de línea de comandos para la aplicación única.
 
-Ambas sesiones usan el **mismo ejecutable**:
+La interfaz ya no abre procesos adicionales: los modos Optimizer y Cortex se
+alternan dentro de la misma ventana (``MainWindow.set_mode``). Estas funciones
+se conservan solo para lanzar el ejecutable desde scripts externos:
 
-    linux-optimizer             → sesión Linux Optimizer
-    linux-optimizer --cortex    → sesión Cortex Gaming Engine
-
-Cada sesión se abre en su propia ventana y proceso, de modo que abrir o
-cerrar Cortex nunca cierra Linux Optimizer (y al revés). En el código fuente
-se usa ``python -m linux_optimizer``; en el .exe de Windows, el propio
-ejecutable.
+    linux-optimizer             → modo Linux Optimizer
+    linux-optimizer --cortex    → modo Cortex Gaming Engine
 """
 
 from __future__ import annotations
@@ -45,14 +42,14 @@ def _session_command(*extra: str) -> list[str]:
 
 
 def cortex_command() -> list[str] | None:
-    """Comando para la sesión Cortex, o ``None`` si no está instalada."""
+    """Comando para iniciar en modo Cortex, o ``None`` si no está instalado."""
     if not cortex_available():
         return None
     return _session_command("--cortex")
 
 
 def optimizer_command() -> list[str]:
-    """Comando para la sesión Linux Optimizer."""
+    """Comando para iniciar en modo Linux Optimizer."""
     return _session_command()
 
 
@@ -71,12 +68,12 @@ def _launch(command: list[str]) -> tuple[bool, str]:
     try:
         subprocess.Popen(command, **kwargs)
     except OSError as exc:
-        return False, f"No se pudo abrir la sesión: {exc}"
-    return True, "Sesión abierta."
+        return False, f"No se pudo iniciar la aplicación: {exc}"
+    return True, "Aplicación iniciada."
 
 
 def launch_cortex() -> tuple[bool, str]:
-    """Abre la sesión Cortex de la misma aplicación."""
+    """Inicia la aplicación en modo Cortex (para scripts externos)."""
     command = cortex_command()
     if command is None:
         return False, (
@@ -84,13 +81,13 @@ def launch_cortex() -> tuple[bool, str]:
             "o ejecuta la aplicación desde su carpeta completa.")
     ok, _message = _launch(command)
     if ok:
-        return True, "Cortex Gaming Engine se está abriendo en otra sesión…"
+        return True, "Iniciando Cortex Gaming Engine…"
     return ok, _message
 
 
 def launch_optimizer() -> tuple[bool, str]:
-    """Abre la sesión Linux Optimizer de la misma aplicación."""
+    """Inicia la aplicación en modo Optimizer (para scripts externos)."""
     ok, _message = _launch(optimizer_command())
     if ok:
-        return True, "Linux Optimizer se está abriendo en otra sesión…"
+        return True, "Iniciando Linux Optimizer…"
     return ok, _message

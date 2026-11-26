@@ -24,13 +24,10 @@ def _setup_logging() -> None:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
 
-    # Una sola aplicación, dos sesiones: Linux Optimizer y Cortex Gaming
-    # Engine. ``--cortex`` abre la otra sesión de esta misma aplicación
-    # (con su propia ventana y proceso).
-    if "--cortex" in argv:
-        argv = [arg for arg in argv if arg != "--cortex"]
-        from cortex_engine.main import main as cortex_main
-        return cortex_main(argv)
+    # Una sola aplicación y una sola ventana con dos modos. ``--cortex``
+    # inicia directamente en el modo Cortex; no abre otro proceso.
+    cortex_mode = "--cortex" in argv
+    argv = [arg for arg in argv if arg != "--cortex"]
 
     _setup_logging()
     app = QApplication(argv)
@@ -42,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     app.setWindowIcon(QIcon(str(ICON_PATH)))
 
     try:
-        window = MainWindow()
+        window = MainWindow(mode="cortex" if cortex_mode else "optimizer")
     except Exception:
         traceback.print_exc()
         QMessageBox.critical(

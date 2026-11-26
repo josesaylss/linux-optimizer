@@ -1,16 +1,16 @@
 # Linux Optimizer + Cortex Gaming Engine para Windows
 
-La misma aplicación tiene dos sesiones y **un solo ejecutable**:
+La misma aplicación tiene dos modos, **un solo ejecutable y una sola ventana**:
 
-| Comando | Sesión |
+| Comando | Modo inicial |
 |---|---|
 | `LinuxOptimizer.exe` | Linux Optimizer |
 | `LinuxOptimizer.exe --cortex` | Cortex Gaming Engine |
 
-Desde la ventana de Linux Optimizer, el botón **◈ Cortex Gaming Engine** abre
-Cortex en otra sesión. Desde Cortex, el botón **Linux Optimizer** vuelve a la
-sesión principal. Cada sesión tiene su propia ventana, tema, configuración y
-registro; cerrar una no cierra la otra.
+El botón **◈ Cortex Gaming Engine** cambia al modo Cortex en la misma ventana.
+Desde Cortex, el botón **Linux Optimizer** vuelve al modo principal. No se abre
+ninguna ventana ni proceso adicional. Cada modo conserva su tema, configuración
+y registro propios.
 
 ## Compilar el .exe
 

@@ -1,4 +1,4 @@
-"""Pruebas del port de Windows: sesiones, rutas, perfiles y empaquetado.
+"""Pruebas del port de Windows: modos, rutas, perfiles y empaquetado.
 
 Las funciones de Windows se prueban en Linux simulando la plataforma y
 sustituyendo ``powercfg``/``psutil`` por dobles. Así se valida la lógica sin
@@ -311,7 +311,7 @@ def test_launcher_windows_detaches_session(monkeypatch):
     monkeypatch.setattr(cortex_launcher, "cortex_available", lambda: True)
 
     ok, message = cortex_launcher.launch_cortex()
-    assert ok and "otra sesión" in message
+    assert ok and "Iniciando" in message
     assert started["cmd"] == [r"C:\Apps\LinuxOptimizer.exe", "--cortex"]
     assert started["kwargs"]["creationflags"] == 0x208
     assert "start_new_session" not in started["kwargs"]

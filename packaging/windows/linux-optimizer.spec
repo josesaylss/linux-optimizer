@@ -3,8 +3,8 @@
 
 Linux Optimizer y Cortex Gaming Engine comparten este ejecutable:
 
-    LinuxOptimizer.exe             → sesión Linux Optimizer
-    LinuxOptimizer.exe --cortex    → sesión Cortex Gaming Engine
+    LinuxOptimizer.exe             → modo Linux Optimizer
+    LinuxOptimizer.exe --cortex    → modo Cortex Gaming Engine
 
 Compilar en Windows (no se puede cross-compilar desde Linux):
 
@@ -30,7 +30,7 @@ datas = [
     (str(ICON), "linux_optimizer/resources"),
 ]
 
-# La sesión Cortex se importa dentro de una función; se declara explícitamente
+# El modo Cortex se importa dentro de una función; se declara explícitamente
 # para que el análisis estático nunca la omita.
 hiddenimports = [
     "cortex_engine",

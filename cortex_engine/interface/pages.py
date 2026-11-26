@@ -1,7 +1,7 @@
 """Páginas de la interfaz de Cortex Gaming Engine.
 
 Cada pestaña es un módulo propio (panel, perfiles, CPU, GPU, RAM,
-Game Booster, actividad y ajustes) de esta sesión de la misma aplicación.
+Game Booster, actividad y ajustes) de este modo de la misma aplicación.
 No comparte estado con Linux Optimizer: solo reutiliza utilidades genéricas
 de diálogos e hilos.
 """

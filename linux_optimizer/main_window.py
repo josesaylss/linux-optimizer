@@ -5,8 +5,9 @@ from __future__ import annotations
 import platform
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QIcon, QAction
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -24,11 +25,11 @@ from PySide6.QtWidgets import (
 from linux_optimizer import APP_NAME, __version__
 from linux_optimizer.core import platform_info
 from linux_optimizer.core.backup import BackupStore
-from linux_optimizer.core.cortex_launcher import launch_cortex
 from linux_optimizer.core.distro import DistroInfo, detect_distro
 from linux_optimizer.core.gaming import GamingManager
 from linux_optimizer.core.monitor import SystemMonitor
 from linux_optimizer.resources import ICON_PATH
+from linux_optimizer.theme import THEME_QSS
 from linux_optimizer.ui.about_page import AboutPage
 from linux_optimizer.ui.cleaner_page import CleanerPage
 from linux_optimizer.ui.dashboard import DashboardPage
@@ -37,7 +38,6 @@ from linux_optimizer.ui.gaming_page import GamingPage
 from linux_optimizer.ui.hud_controller import HudController
 from linux_optimizer.ui.power_page import PowerPage
 from linux_optimizer.ui.services_page import ServicesPage
-from linux_optimizer.ui.widgets import error_dialog
 from linux_optimizer.ui.widgets import Card  # noqa: F401 (estilo común)
 from linux_optimizer.ui.widgets import wait_for_workers
 
@@ -64,8 +64,10 @@ def pages_for_platform() -> tuple:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, mode: str = "optimizer"):
         super().__init__()
+        self._mode = "optimizer"
+        self._cortex_view = None
         self.setWindowTitle(f"{APP_NAME} {__version__}")
         self.resize(1180, 760)
         self.setMinimumSize(QSize(960, 620))
@@ -120,11 +122,10 @@ class MainWindow(QMainWindow):
         header.addLayout(header_text)
         header.addStretch(1)
 
-        # Único acceso de Linux Optimizer a Cortex Gaming Engine.
+        # Cambio de modo dentro de la misma ventana (sin segundo proceso).
         self._cortex_btn = QPushButton("◈ Cortex Gaming Engine")
         self._cortex_btn.setObjectName("cortexLaunch")
-        self._cortex_btn.setToolTip(
-            "Abrir Cortex Gaming Engine en otra sesión de esta misma aplicación")
+        self._cortex_btn.setToolTip("Cambiar al modo Cortex en esta ventana")
         self._cortex_btn.clicked.connect(self._open_cortex)
         header.addWidget(self._cortex_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -134,7 +135,11 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.stack, 1)
 
         root.addWidget(right, 1)
-        self.setCentralWidget(central)
+
+        # Un única ventana con dos modos: Optimizer (índice 0) y Cortex (1).
+        self._mode_stack = QStackedWidget(self)
+        self._mode_stack.addWidget(central)
+        self.setCentralWidget(self._mode_stack)
 
         # ---------------- Páginas ----------------
         self._pages = []
@@ -151,6 +156,8 @@ class MainWindow(QMainWindow):
 
         self._setup_tray()
         self.monitor.start()
+        if mode == "cortex":
+            self.set_mode("cortex")
 
     # ------------------------------------------------------------------
 
@@ -174,7 +181,7 @@ class MainWindow(QMainWindow):
             self.hud.started.connect(self._mark_hud_action)
             menu.addAction(self._action_hud)
         menu.addSeparator()
-        action_cortex = QAction("◈ Cortex Gaming Engine", menu)
+        action_cortex = QAction("◈ Modo Cortex Gaming Engine", menu)
         action_cortex.triggered.connect(self._open_cortex)
         menu.addAction(action_cortex)
         menu.addSeparator()
@@ -207,12 +214,42 @@ class MainWindow(QMainWindow):
             action.blockSignals(False)
 
     def _open_cortex(self) -> None:
-        """Abre la sesión Cortex Gaming Engine de esta misma aplicación."""
-        ok, message = launch_cortex()
-        if ok:
-            self.statusBar().showMessage(message, 5000)
+        """Cambia esta ventana al modo Cortex Gaming Engine."""
+        self.set_mode("cortex")
+
+    def _ensure_cortex_view(self):
+        if self._cortex_view is None:
+            from cortex_engine.interface.window import CortexWindow
+            self._cortex_view = CortexWindow(
+                on_optimizer=self._back_to_optimizer, standalone=False)
+            self._mode_stack.addWidget(self._cortex_view)
+        return self._cortex_view
+
+    def _back_to_optimizer(self) -> None:
+        self.set_mode("optimizer")
+
+    def set_mode(self, mode: str) -> None:
+        """Alterna los modos de la ventana sin crear otro proceso."""
+        app = QApplication.instance()
+        if mode == "cortex":
+            view = self._ensure_cortex_view()
+            view.set_active(True)
+            self._mode_stack.setCurrentWidget(view)
+            self.setWindowTitle(f"Cortex Gaming Engine · {APP_NAME}")
+            if app is not None:
+                from cortex_engine.interface.theme import CORTEX_QSS
+                app.setStyleSheet(CORTEX_QSS)
+            self.statusBar().showMessage("Modo Cortex Gaming Engine activo.", 4000)
         else:
-            error_dialog(self, "Cortex Gaming Engine", message)
+            if self._cortex_view is not None:
+                self._cortex_view.save_geometry()
+                self._cortex_view.set_active(False)
+            self._mode_stack.setCurrentIndex(0)
+            self.setWindowTitle(f"{APP_NAME} {__version__}")
+            if app is not None:
+                app.setStyleSheet(THEME_QSS)
+            self.statusBar().showMessage("Modo Linux Optimizer activo.", 4000)
+        self._mode = mode
 
     def _build_page(self, page_class):
         if page_class is DashboardPage:
@@ -239,5 +276,8 @@ class MainWindow(QMainWindow):
         if self.hud is not None:
             self.hud.shutdown()
         self.monitor.stop()
+        if self._cortex_view is not None:
+            self._cortex_view.save_geometry()
+            self._cortex_view.set_active(False)
         wait_for_workers()
         super().closeEvent(event)

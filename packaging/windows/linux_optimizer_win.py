@@ -1,6 +1,6 @@
 """Punto de entrada del ejecutable de Windows.
 
-Es el mismo ejecutable para las dos sesiones de la aplicación:
+Es el mismo ejecutable y la misma ventana para los dos modos:
 
     LinuxOptimizer.exe             → Linux Optimizer
     LinuxOptimizer.exe --cortex    → Cortex Gaming Engine

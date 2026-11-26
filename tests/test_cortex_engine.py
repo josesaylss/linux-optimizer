@@ -410,7 +410,7 @@ def test_cortex_launcher_opens_another_session(monkeypatch):
     monkeypatch.setattr(cortex_launcher.subprocess, "Popen", FakePopen)
     ok, message = cortex_launcher.launch_cortex()
     assert ok
-    assert "abriendo" in message
+    assert "Iniciando" in message
     assert started["kwargs"]["start_new_session"] is True
 
     ok, message = cortex_launcher.launch_optimizer()
@@ -418,20 +418,54 @@ def test_cortex_launcher_opens_another_session(monkeypatch):
     assert started["cmd"][1:] == ["-m", "linux_optimizer"]
 
 
-def test_app_entry_delegates_cortex_session(monkeypatch):
-    called = {}
+def test_app_entry_starts_cortex_mode_in_same_window(monkeypatch):
+    """``--cortex`` cambia el modo de la ventana; no crea otro proceso."""
+    from types import SimpleNamespace
 
-    def fake_cortex_main(argv):
+    import linux_optimizer.app as app_module
+
+    created = {}
+
+    class FakeWindow:
+        def __init__(self, mode="optimizer"):
+            created["mode"] = mode
+
+        def show(self):
+            created["shown"] = True
+
+    class FakeApp:
+        def __init__(self, argv):
+            self.aboutToQuit = SimpleNamespace(connect=lambda callback: None)
+
+        def exec(self):
+            return 0
+
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
+
+    monkeypatch.setattr(app_module, "MainWindow", FakeWindow)
+    monkeypatch.setattr(app_module, "QApplication", FakeApp)
+    monkeypatch.setattr(app_module, "QIcon", lambda path: object())
+    monkeypatch.setattr(app_module, "_setup_logging", lambda: None)
+
+    assert app_module.main(["--cortex"]) == 0
+    assert created == {"mode": "cortex", "shown": True}
+
+    assert app_module.main([]) == 0
+    assert created["mode"] == "optimizer"
+
+
+def test_cortex_entry_forwards_single_window_flag(monkeypatch):
+    import cortex_engine.main as cortex_main_module
+
+    called = {}
+    def fake_app_main(argv):
         called["argv"] = argv
         return 0
 
-    import cortex_engine.main as cortex_main_module
-
-    monkeypatch.setattr(cortex_main_module, "main", fake_cortex_main)
-    from linux_optimizer.app import main
-
-    assert main(["--cortex"]) == 0
-    assert called["argv"] == []
+    monkeypatch.setattr(cortex_main_module, "app_main", fake_app_main)
+    assert cortex_main_module.main(["--cortex"]) == 0
+    assert called["argv"] == ["--cortex"]
 
 
 # ----------------------------------------------------------------------------
@@ -488,9 +522,27 @@ def test_main_window_has_single_cortex_access(app, tmp_path, monkeypatch):
     try:
         assert window._cortex_btn.text().endswith("Cortex Gaming Engine")
         assert window.stack.count() == len(window._pages)
+        assert window._mode_stack.count() == 1
+        assert window._cortex_view is None
+
+        window._cortex_btn.click()
+        app.processEvents()
+        assert window._mode == "cortex"
+        assert window._mode_stack.count() == 2
+        assert window._mode_stack.currentWidget() is window._cortex_view
+        assert "Cortex" in window.windowTitle()
+
+        window._cortex_view._optimizer_btn.click()
+        app.processEvents()
+        assert window._mode == "optimizer"
+        assert window._mode_stack.currentIndex() == 0
+        assert "Cortex" not in window.windowTitle()
     finally:
         window.monitor.stop()
+        if window._cortex_view is not None:
+            window._cortex_view.monitor.stop()
         window.close()
+        app.processEvents()
 
 
 def test_linux_desktop_integration_offers_cortex_session():
